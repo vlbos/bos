@@ -63,8 +63,6 @@ static constexpr uint64_t name_suffix( uint64_t n ) {
    return ( ((n & mask) << shift) + (thirteenth_character << (shift-1)) );
 }
 
-
-
 BOOST_AUTO_TEST_SUITE(misc_tests)
 
 BOOST_AUTO_TEST_CASE(name_suffix_tests)
