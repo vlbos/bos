@@ -24,7 +24,7 @@ const static auto default_state_size            = 1*1024*1024*1024ll;
 const static auto default_state_guard_size      =    128*1024*1024ll;
 
 
-const static uint64_t system_account_name    = N(bos);
+const static uint64_t system_account_name    = N(eosio);
 const static uint64_t null_account_name      = N(eosio.null);
 const static uint64_t producers_account_name = N(eosio.prods);
 
