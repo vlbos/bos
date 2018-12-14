@@ -651,26 +651,8 @@ namespace eosio { namespace ibc {
       return "connecting client";
    }
 
-
-
    bool connection::process_next_message(ibc_plugin_impl& impl, uint32_t message_length) {
       try {
-         // If it is a signed_block, then save the raw message for the cache
-         // This must be done before we unpack the message.
-         // This code is copied from fc::io::unpack(..., unsigned_int)
-         auto index = pending_message_buffer.read_index();
-         uint64_t which = 0; char b = 0; uint8_t by = 0;
-         do {
-            pending_message_buffer.peek(&b, 1, index);
-            which |= uint32_t(uint8_t(b) & 0x7f) << by;
-            by += 7;
-         } while( uint8_t(b) & 0x80 && by < 32);
-
-//         if (which == uint64_t(ibc_message::tag<signed_block>::value)) {
-//            blk_buffer.resize(message_length);
-//            auto index = pending_message_buffer.read_index();
-//            pending_message_buffer.peek(blk_buffer.data(), message_length, index);
-//         }
          auto ds = pending_message_buffer.create_datastream();
          ibc_message msg;
          fc::raw::unpack(ds, msg);
@@ -692,40 +674,82 @@ namespace eosio { namespace ibc {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
    //--------------- ibc_plugin_impl ---------------
 
    void ibc_plugin_impl::connect( connection_ptr c ) {
+      if( c->no_retry != go_away_reason::no_reason) {
+         fc_dlog( logger, "Skipping connect due to go_away reason ${r}",("r", reason_str( c->no_retry )));
+         return;
+      }
 
+      auto colon = c->peer_addr.find(':');
+
+      if (colon == std::string::npos || colon == 0) {
+         elog ("Invalid peer address. must be \"host:port\": ${p}", ("p",c->peer_addr));
+         for ( auto itr : connections ) {
+            if((*itr).peer_addr == c->peer_addr) {
+               (*itr).reset();
+               close(itr);
+               connections.erase(itr);
+               break;
+            }
+         }
+         return;
+      }
+
+      auto host = c->peer_addr.substr( 0, colon );
+      auto port = c->peer_addr.substr( colon + 1);
+      idump((host)(port));
+      tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str() );
+      connection_wptr weak_conn = c;
+      // Note: need to add support for IPv6 too
+
+      resolver->async_resolve( query,
+                               [weak_conn, this]( const boost::system::error_code& err,
+                                                  tcp::resolver::iterator endpoint_itr ){
+                                  auto c = weak_conn.lock();
+                                  if (!c) return;
+                                  if( !err ) {
+                                     connect( c, endpoint_itr );
+                                  } else {
+                                     elog( "Unable to resolve ${peer_addr}: ${error}",
+                                           (  "peer_addr", c->peer_name() )("error", err.message() ) );
+                                  }
+                               });
    }
 
    void ibc_plugin_impl::connect( connection_ptr c, tcp::resolver::iterator endpoint_itr ) {
-
+      if( c->no_retry != go_away_reason::no_reason) {
+         string rsn = reason_str(c->no_retry);
+         return;
+      }
+      auto current_endpoint = *endpoint_itr;
+      ++endpoint_itr;
+      c->connecting = true;
+      connection_wptr weak_conn = c;
+      c->socket->async_connect( current_endpoint, [weak_conn, endpoint_itr, this] ( const boost::system::error_code& err ) {
+         auto c = weak_conn.lock();
+         if (!c) return;
+         if( !err && c->socket->is_open() ) {
+            if (start_session( c )) {
+               c->send_handshake ();
+            }
+         } else {
+            if( endpoint_itr != tcp::resolver::iterator() ) {
+               close(c);
+               connect( c, endpoint_itr );
+            }
+            else {
+               elog( "connection failed to ${peer}: ${error}",
+                     ( "peer", c->peer_name())("error",err.message()));
+               c->connecting = false;
+               my_impl->close(c);
+            }
+         }
+      } );
    }
 
    bool ibc_plugin_impl::start_session( connection_ptr con ) {
-      ilog(" ======= start session =======");
-
       boost::asio::ip::tcp::no_delay nodelay( true );
       boost::system::error_code ec;
       con->socket->set_option( nodelay, ec );
@@ -740,17 +764,12 @@ namespace eosio { namespace ibc {
          start_read_message( con );
          ++started_sessions;
          return true;
-         // for now, we can just use the application main loop.
-         //     con->readloop_complete  = bf::async( [=](){ read_loop( con ); } );
-         //     con->writeloop_complete = bf::async( [=](){ write_loop con ); } );
       }
    }
 
    void ibc_plugin_impl::start_listen_loop( ) {
       auto socket = std::make_shared<tcp::socket>( std::ref( app().get_io_service() ) );
       acceptor->async_accept( *socket, [socket,this]( boost::system::error_code ec ) {
-         ilog ("======== i hear something ===============");
-
          if( !ec ) {
             uint32_t visitors = 0;
             uint32_t from_addr = 0;
@@ -813,7 +832,6 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_read_message( connection_ptr conn ) {
-      ilog ("======== start_read_message ===============");
       try {
          if(!conn->socket) {
             return;
@@ -939,14 +957,16 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const handshake_message &msg) {
-
+      ilog("handle_message == handshake_message ");
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const go_away_message &msg ) {
+      ilog("handle_message == go_away_message ");
 
    }
 
    void ibc_plugin_impl::handle_message(connection_ptr c, const time_message &msg) {
+      ilog("handle_message == time_message ");
 
    }
 
@@ -961,11 +981,11 @@ namespace eosio { namespace ibc {
          if (ec) {
             wlog ("Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
          }
-//         for (auto &c : connections ) {
-//            if (c->socket->is_open()) {
-//               c->send_time();
-//            }
-//         }
+         for (auto &c : connections ) {
+            if (c->socket->is_open()) {
+               c->send_time();
+            }
+         }
       });
    }
 
@@ -1006,7 +1026,7 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::irreversible_block(const block_state_ptr&block) {
       fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
-      ilog ("======== 33 ===============");
+      ilog ("======== 33 ======33=========");
    }
 
    void ibc_plugin_impl::accepted_transaction(const transaction_metadata_ptr& md) {
