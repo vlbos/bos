@@ -1,6 +1,6 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in bos/LICENSE.txt
  */
 #pragma once
 #include <eosio/chain/block.hpp>
@@ -75,103 +75,32 @@ namespace eosio {
          go_away_reason reason;
          fc::sha256 node_id; ///< for duplicate notification
       };
-//
+
       struct time_message {
          tstamp  org;       //!< origin timestamp
          tstamp  rec;       //!< receive timestamp
          tstamp  xmt;       //!< transmit timestamp
          mutable tstamp  dst;       //!< destination timestamp
       };
-//
-//  enum id_list_modes {
-//    none,
-//    catch_up,
-//    last_irr_catch_up,
-//    normal
-//  };
-//
-//  constexpr auto modes_str( id_list_modes m ) {
-//    switch( m ) {
-//    case none : return "none";
-//    case catch_up : return "catch up";
-//    case last_irr_catch_up : return "last irreversible";
-//    case normal : return "normal";
-//    default: return "undefined mode";
-//    }
-//  }
-//
-//  template<typename T>
-//  struct select_ids {
-//    select_ids () : mode(none),pending(0),ids() {}
-//    id_list_modes  mode;
-//    uint32_t       pending;
-//    vector<T>      ids;
-//    bool           empty () const { return (mode == none || ids.empty()); }
-//  };
-//
-//  using ordered_txn_ids = select_ids<transaction_id_type>;
-//  using ordered_blk_ids = select_ids<block_id_type>;
-//
-      struct ibc_notice_message {
-//    notice_message () : known_trx(), known_blocks() {}
-//    ordered_txn_ids known_trx;
-//    ordered_blk_ids known_blocks;
-      };
-//
-      struct ibc_request_message {
-//    request_message () : req_trx(), req_blocks() {}
-//    ordered_txn_ids req_trx;
-//    ordered_blk_ids req_blocks;
-      };
-//
-//   struct sync_request_message {
-//      uint32_t start_block;
-//      uint32_t end_block;
-//   };
-//
-
-      using ibc_message = static_variant<handshake_message,
-         go_away_message,
-         time_message,
-         ibc_notice_message,
-         ibc_request_message>;
 
 
-
-
-
-
-
-
-
-//   using ibc_message = static_variant<handshake_message,
-//                                      chain_size_message,
-//                                      go_away_message,
-//                                      time_message,
-//                                      notice_message,
-//                                      request_message,
-//                                      sync_request_message,
-//                                      signed_block,
-//                                      packed_transaction>;
+      using ibc_message = static_variant< handshake_message,
+                                          go_away_message,
+                                          time_message >;
 
    } // namespace ibc
 } // namespace eosio
 
-//FC_REFLECT( eosio::select_ids<fc::sha256>, (mode)(pending)(ids) )
-//FC_REFLECT( eosio::chain_size_message,
-//            (last_irreversible_block_num)(last_irreversible_block_id)
-//            (head_num)(head_id))
-//FC_REFLECT( eosio::handshake_message,
-//            (network_version)(chain_id)(node_id)(key)
-//            (time)(token)(sig)(p2p_address)
-//            (last_irreversible_block_num)(last_irreversible_block_id)
-//            (head_num)(head_id)
-//            (os)(agent)(generation) )
-//FC_REFLECT( eosio::go_away_message, (reason)(node_id) )
-//FC_REFLECT( eosio::time_message, (org)(rec)(xmt)(dst) )
-//FC_REFLECT( eosio::notice_message, (known_trx)(known_blocks) )
-//FC_REFLECT( eosio::request_message, (req_trx)(req_blocks) )
-//FC_REFLECT( eosio::sync_request_message, (start_block)(end_block) )
+
+FC_REFLECT( eosio::ibc::handshake_message,
+            (network_version)(chain_id)(node_id)(key)
+            (time)(token)(sig)(p2p_address)
+            (last_irreversible_block_num)(last_irreversible_block_id)
+            (head_num)(head_id)
+            (os)(agent)(generation) )
+FC_REFLECT( eosio::ibc::go_away_message, (reason)(node_id) )
+FC_REFLECT( eosio::ibc::time_message, (org)(rec)(xmt)(dst) )
+
 
 /**
  *
@@ -180,7 +109,6 @@ Goals of Network Code
 2. minimize redundant data between blocks and transactions.
 3. enable rapid sync of a new node
 4. update to new boost / fc
-
 
 
 State:
@@ -240,9 +168,5 @@ parallel fetches, request in groups
 only relay transactions to peers if we don't already know about it.
 
 send a notification rather than a transaction if the txn is > 3mtu size.
-
-
-
-
 
 */

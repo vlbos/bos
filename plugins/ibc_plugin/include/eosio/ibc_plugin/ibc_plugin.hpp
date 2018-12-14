@@ -1,15 +1,16 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in bos/LICENSE.txt
  */
 #pragma once
+
 #include <appbase/application.hpp>
 #include <eosio/chain_plugin/chain_plugin.hpp>
 #include <eosio/ibc_plugin/protocol.hpp>
 
 namespace eosio { namespace ibc {
    using namespace appbase;
-
+   
    struct connection_status {
       string            peer;
       bool              connecting = false;
@@ -39,6 +40,7 @@ namespace eosio { namespace ibc {
       private:
         std::unique_ptr<class ibc_plugin_impl> my;
    };
+
 
 }}
 

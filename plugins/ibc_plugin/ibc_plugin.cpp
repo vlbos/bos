@@ -1,12 +1,12 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in bos/LICENSE.txt
  */
+
 #include <eosio/chain/types.hpp>
 
 #include <eosio/ibc_plugin/ibc_plugin.hpp>
 #include <eosio/ibc_plugin/protocol.hpp>
-
 #include <eosio/chain/controller.hpp>
 #include <eosio/chain/exceptions.hpp>
 #include <eosio/chain/block.hpp>
@@ -30,6 +30,11 @@
 #include <boost/asio/steady_timer.hpp>
 #include <boost/intrusive/set.hpp>
 
+using namespace eosio::chain::plugin_interface::compat;
+
+namespace fc {
+   extern std::unordered_map<std::string,logger>& get_logger_map();
+}
 
 namespace eosio { namespace ibc {
    static appbase::abstract_plugin& _ibc_plugin = app().register_plugin<ibc_plugin>();
@@ -55,9 +60,10 @@ namespace eosio { namespace ibc {
    using connection_ptr = std::shared_ptr<connection>;
    using connection_wptr = std::weak_ptr<connection>;
 
+   using socket_ptr = std::shared_ptr<tcp::socket>;
 
-
-
+   using ibc_message_ptr = shared_ptr<ibc_message>;
+   
    class ibc_plugin_impl {
    public:
       unique_ptr<tcp::acceptor>        acceptor;
@@ -69,8 +75,7 @@ namespace eosio { namespace ibc {
 
       vector<string>                   supplied_peers;
       vector<chain::public_key_type>   allowed_peers; ///< peer keys allowed to connect
-      std::map<chain::public_key_type,
-         chain::private_key_type> private_keys; ///< overlapping with producer keys, also authenticating non-producing nodes
+      std::map<chain::public_key_type, chain::private_key_type> private_keys; ///< overlapping with producer keys, also authenticating non-producing nodes
 
       enum possible_connections : char {
          None = 0,
@@ -93,13 +98,14 @@ namespace eosio { namespace ibc {
       boost::asio::steady_timer::duration   connector_period;
       boost::asio::steady_timer::duration   txn_exp_period;
       boost::asio::steady_timer::duration   resp_expected_period;
-      boost::asio::steady_timer::duration   keepalive_interval{std::chrono::seconds{32}};
+      boost::asio::steady_timer::duration   keepalive_interval{std::chrono::seconds{5}};
       int                           max_cleanup_time_ms = 0;
 
       const std::chrono::system_clock::duration peer_authentication_interval{std::chrono::seconds{1}}; ///< Peer clock may be no more than 1 second skewed from our clock, including network latency.
 
       bool                          network_version_match = false;
       fc::sha256                    chain_id;
+      fc::sha256                    remote_chain_id;
       fc::sha256                    node_id;
 
       string                        user_agent_name;
@@ -122,19 +128,19 @@ namespace eosio { namespace ibc {
       template<typename VerifierFunc>
       void send_all( const ibc_message &msg, VerifierFunc verify );
 
+      void accepted_block_header(const block_state_ptr&);
       void accepted_block(const block_state_ptr&);
       void irreversible_block(const block_state_ptr&);
+      void accepted_transaction(const transaction_metadata_ptr&);
+      void applied_transaction(const transaction_trace_ptr&);
+      void accepted_confirmation(const header_confirmation&);
 
       bool is_valid( const handshake_message &msg);
 
       void handle_message( connection_ptr c, const handshake_message &msg);
       void handle_message( connection_ptr c, const go_away_message &msg );
-      /** \name Peer Timestamps
-       *  Time message handling
-       *  @{
-       */
-      /** \brief Process time_message
-       *
+
+      /** Process time_message
        * Calculate offset, delay and dispersion.  Note carefully the
        * implied processing.  The first-order difference is done
        * directly in 64-bit arithmetic, then the result is converted
@@ -143,42 +149,30 @@ namespace eosio { namespace ibc {
        * This is necessary in order to avoid overflow and preserve precision.
        */
       void handle_message( connection_ptr c, const time_message &msg);
-      /** @} */
-      void handle_message( connection_ptr c, const ibc_notice_message &msg);
-      void handle_message( connection_ptr c, const ibc_request_message &msg);
 
-      void start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection);
+      void start_conn_timer( boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection );
       void start_monitors( );
 
       void connection_monitor(std::weak_ptr<connection> from_connection);
-      /** \name Peer Timestamps
-       *  Time message handling
-       *  @{
-       */
-      /** \brief Peer heartbeat ticker.
+
+      /** Peer heartbeat ticker.
        */
       void ticker();
-      /** @} */
-      /** \brief Determine if a peer is allowed to connect.
-       *
-       * Checks current connection mode and key authentication.
-       *
-       * \return False if the peer should not connect, true otherwise.
-       */
       bool authenticate_peer(const handshake_message& msg) const;
-      /** \brief Retrieve public key used to authenticate with peers.
+
+      /** Retrieve public key used to authenticate with peers.
        *
        * Finds a key to use for authentication.  If this node is a producer, use
        * the front of the producer key map.  If the node is not a producer but has
        * a configured private key, use it.  If the node is neither a producer nor has
        * a private key, returns an empty key.
        *
-       * \note On a node with multiple private keys configured, the key with the first
+       * note: On a node with multiple private keys configured, the key with the first
        *       numerically smaller byte will always be used.
        */
       chain::public_key_type get_authentication_key() const;
-      /** \brief Returns a signature of the digest using the corresponding private key of the signer.
-       *
+
+      /** Returns a signature of the digest using the corresponding private key of the signer.
        * If there are no configured private keys, returns an empty signature.
        */
       chain::signature_type sign_compact(const chain::public_key_type& signer, const fc::sha256& digest) const;
@@ -189,7 +183,7 @@ namespace eosio { namespace ibc {
    const fc::string logger_name("ibc_plugin_impl");
    fc::logger logger;
    std::string peer_log_format;
-
+      
 #define peer_dlog( PEER, FORMAT, ... ) \
   FC_MULTILINE_MACRO_BEGIN \
    if( logger.is_enabled( fc::log_level::debug ) ) \
@@ -214,35 +208,21 @@ namespace eosio { namespace ibc {
       logger.log( FC_LOG_MESSAGE( error, peer_log_format + FORMAT, __VA_ARGS__ (PEER->get_logger_variant())) ); \
   FC_MULTILINE_MACRO_END
 
+   template<class enum_type, class=typename std::enable_if<std::is_enum<enum_type>::value>::type>
+   inline enum_type& operator|=(enum_type& lhs, const enum_type& rhs)
+   {
+      using T = std::underlying_type_t <enum_type>;
+      return lhs = static_cast<enum_type>(static_cast<T>(lhs) | static_cast<T>(rhs));
+   }
+
    static ibc_plugin_impl *my_impl;
 
-
-   class sync_manager{
-
-   public:
-      explicit sync_manager(uint32_t span);
-   };
-
-
-   class dispatch_manager{
-
-   };
-
-   sync_manager::sync_manager( uint32_t req_span ){
-
-
-   }
-
-   void ibc_plugin_impl::connect( connection_ptr c ) {
-
-   }
-
    /**
- * default value initializers
- */
+    * default value initializers
+    */
    constexpr auto     def_send_buffer_size_mb = 4;
    constexpr auto     def_send_buffer_size = 1024*1024*def_send_buffer_size_mb;
-   constexpr auto     def_max_clients = 10; // 0 for unlimited clients
+   constexpr auto     def_max_clients = 25; // 0 for unlimited clients
    constexpr auto     def_max_nodes_per_host = 1;
    constexpr auto     def_conn_retry_wait = 30;
    constexpr auto     def_txn_expire_wait = std::chrono::seconds(3);
@@ -252,6 +232,759 @@ namespace eosio { namespace ibc {
    constexpr bool     large_msg_notify = false;
 
    constexpr auto     message_header_size = 4;
+
+   /**
+    *  For a while, network version was a 16 bit value equal to the second set of 16 bits
+    *  of the current build's git commit id. We are now replacing that with an integer protocol
+    *  identifier. Based on historical analysis of all git commit identifiers, the larges gap
+    *  between ajacent commit id values is shown below.
+    *  these numbers were found with the following commands on the master branch:
+    *
+    *  git log | grep "^commit" | awk '{print substr($2,5,4)}' | sort -u > sorted.txt
+    *  rm -f gap.txt; prev=0; for a in $(cat sorted.txt); do echo $prev $((0x$a - 0x$prev)) $a >> gap.txt; prev=$a; done; sort -k2 -n gap.txt | tail
+    *
+    *  DO NOT EDIT net_version_base OR net_version_range!
+    */
+   constexpr uint16_t net_version_base = 0x04b5;
+   constexpr uint16_t net_version_range = 106;
+   /**
+    *  If there is a change to network protocol or behavior, increment net version to identify
+    *  the need for compatibility hooks
+    */
+   constexpr uint16_t proto_base = 0;
+   constexpr uint16_t proto_explicit_sync = 1;
+
+   constexpr uint16_t net_version = proto_explicit_sync;
+
+
+   struct handshake_initializer {
+      static void populate(handshake_message &hello);
+   };
+   
+   class connection : public std::enable_shared_from_this<connection> {
+   public:
+      explicit connection( string endpoint );
+      explicit connection( socket_ptr s );
+      ~connection();
+      void initialize();
+
+      socket_ptr              socket;
+
+      fc::message_buffer<1024*1024>    pending_message_buffer;
+      fc::optional<std::size_t>        outstanding_read_bytes;
+
+      struct queued_write {
+         std::shared_ptr<vector<char>> buff;
+         std::function<void(boost::system::error_code, std::size_t)> callback;
+      };
+      deque<queued_write>     write_queue;
+      deque<queued_write>     out_queue;
+      fc::sha256              node_id;
+      handshake_message       last_handshake_recv;
+      handshake_message       last_handshake_sent;
+      int16_t                 sent_handshake_count = 0;
+      bool                    connecting = false;
+      bool                    syncing = false;
+      uint16_t                protocol_version  = 0;
+      string                  peer_addr;
+      go_away_reason          no_retry = no_reason;
+      block_id_type           fork_head;
+      uint32_t                fork_head_num = 0;
+
+      connection_status get_status()const {
+         connection_status stat;
+         stat.peer = peer_addr;
+         stat.connecting = connecting;
+         stat.syncing = syncing;
+         stat.last_handshake = last_handshake_recv;
+         return stat;
+      }
+
+      tstamp                         org{0};          //!< originate timestamp
+      tstamp                         rec{0};          //!< receive timestamp
+      tstamp                         dst{0};          //!< destination timestamp
+      tstamp                         xmt{0};          //!< transmit timestamp
+
+      double                         offset{0};       //!< peer offset
+
+      static const size_t            ts_buffer_size{32};
+      char                           ts[ts_buffer_size];   //!< working buffer for making human readable timestamps
+
+      bool connected();
+      bool current();
+      void reset();
+      void close();
+      void send_handshake();
+
+      /** \name Peer Timestamps
+       *  Time message handling
+       */
+      /** @{ */
+      /** \brief Convert an std::chrono nanosecond rep to a human readable string
+       */
+      char* convert_tstamp(const tstamp& t);
+      /**  \brief Populate and queue time_message
+       */
+      void send_time();
+      /** \brief Populate and queue time_message immediately using incoming time_message
+       */
+      void send_time(const time_message& msg);
+      /** \brief Read system time and convert to a 64 bit integer.
+       *
+       * There are only two calls on this routine in the program.  One
+       * when a packet arrives from the network and the other when a
+       * packet is placed on the send queue.  Calls the kernel time of
+       * day routine and converts to a (at least) 64 bit integer.
+       */
+      tstamp get_time()
+      {
+         return std::chrono::system_clock::now().time_since_epoch().count();
+      }
+      /** @} */
+
+      const string peer_name();
+
+      void txn_send_pending(const vector<transaction_id_type> &ids);
+      void txn_send(const vector<transaction_id_type> &txn_lis);
+
+      void blk_send_branch();
+      void blk_send(const vector<block_id_type> &txn_lis);
+      void stop_send();
+
+      void enqueue( const ibc_message &msg, bool trigger_send = true );
+      void cancel_sync(go_away_reason);
+      void flush_queues();
+      bool enqueue_sync_block();
+      void request_sync_blocks (uint32_t start, uint32_t end);
+
+      void cancel_wait();
+      void sync_wait();
+      void fetch_wait();
+      void sync_timeout(boost::system::error_code ec);
+      void fetch_timeout(boost::system::error_code ec);
+
+      void queue_write(std::shared_ptr<vector<char>> buff,
+                       bool trigger_send,
+                       std::function<void(boost::system::error_code, std::size_t)> callback);
+      void do_queue_write();
+
+      /** \brief Process the next message from the pending message buffer
+       *
+       * Process the next message from the pending_message_buffer.
+       * message_length is the already determined length of the data
+       * part of the message and impl in the net plugin implementation
+       * that will handle the message.
+       * Returns true is successful. Returns false if an error was
+       * encountered unpacking or processing the message.
+       */
+      bool process_next_message(ibc_plugin_impl& impl, uint32_t message_length);
+      
+//         fc::optional<fc::variant_object> _logger_variant;
+//         const fc::variant_object& get_logger_variant()  {
+//            if (!_logger_variant) {
+//               boost::system::error_code ec;
+//               auto rep = socket->remote_endpoint(ec);
+//               string ip = ec ? "<unknown>" : rep.address().to_string();
+//               string port = ec ? "<unknown>" : std::to_string(rep.port());
+//
+//               auto lep = socket->local_endpoint(ec);
+//               string lip = ec ? "<unknown>" : lep.address().to_string();
+//               string lport = ec ? "<unknown>" : std::to_string(lep.port());
+//
+//               _logger_variant.emplace(fc::mutable_variant_object()
+//                                          ("_name", peer_name())
+//                                          ("_id", node_id)
+//                                          ("_sid", ((string)node_id).substr(0, 7))
+//                                          ("_ip", ip)
+//                                          ("_port", port)
+//                                          ("_lip", lip)
+//                                          ("_lport", lport)
+//               );
+//            }
+//            return *_logger_variant;
+//         }
+   };
+   
+   struct msgHandler : public fc::visitor<void> {
+      ibc_plugin_impl &impl;
+      connection_ptr c;
+      msgHandler( ibc_plugin_impl &imp, connection_ptr conn) : impl(imp), c(conn) {}
+
+      template <typename T>
+      void operator()(const T &msg) const
+      {
+         impl.handle_message( c, msg);
+      }
+   };
+
+   class sync_manager {
+      
+   };
+
+   class dispatch_manager {
+
+   };
+
+   //--------------- connection ---------------
+   
+   connection::connection(string endpoint)
+      : socket(std::make_shared<tcp::socket>(std::ref(app().get_io_service()))),
+        node_id(),
+        last_handshake_recv(),
+        last_handshake_sent(),
+        sent_handshake_count(0),
+        connecting(false),
+        protocol_version(0),
+        peer_addr(endpoint),
+        no_retry(no_reason),
+        fork_head(),
+        fork_head_num(0) {
+      wlog("created connection to ${n}", ("n", endpoint));
+      initialize();
+   }
+
+   connection::connection( socket_ptr s )
+      : socket( s ),
+        node_id(),
+        last_handshake_recv(),
+        last_handshake_sent(),
+        sent_handshake_count(0),
+        connecting(true),
+        protocol_version(0),
+        peer_addr(),
+        no_retry(no_reason),
+        fork_head(),
+        fork_head_num(0) {
+      wlog( "accepted network connection" );
+      initialize();
+   }
+
+   connection::~connection() {}
+
+
+   void connection::initialize() {
+      auto *rnd = node_id.data();
+      rnd[0] = 0;
+   }
+
+   bool connection::connected() {
+      return (socket && socket->is_open() && !connecting);
+   }
+
+   bool connection::current() {
+      return (connected() && !syncing);
+   }
+
+   void connection::reset() {
+
+   }
+
+   void connection::flush_queues() {
+      write_queue.clear();
+   }
+
+   void connection::close() {
+      if(socket) {
+         socket->close();
+      }
+      else {
+         wlog("no socket to close!");
+      }
+      flush_queues();
+      connecting = false;
+      syncing = false;
+
+      reset();
+      sent_handshake_count = 0;
+      last_handshake_recv = handshake_message();
+      last_handshake_sent = handshake_message();
+      fc_dlog(logger, "canceling wait on ${p}", ("p",peer_name()));
+//      cancel_wait();
+      pending_message_buffer.reset();
+   }
+
+
+
+   void connection::send_handshake( ) {
+//      handshake_initializer::populate(last_handshake_sent);
+//      last_handshake_sent.generation = ++sent_handshake_count;
+//      fc_dlog(logger, "Sending handshake generation ${g} to ${ep}",
+//              ("g",last_handshake_sent.generation)("ep", peer_name()));
+//      enqueue(last_handshake_sent);
+   }
+
+   char* connection::convert_tstamp(const tstamp& t)
+   {
+      const long long NsecPerSec{1000000000};
+      time_t seconds = t / NsecPerSec;
+      strftime(ts, ts_buffer_size, "%F %T", localtime(&seconds));
+      snprintf(ts+19, ts_buffer_size-19, ".%lld", t % NsecPerSec);
+      return ts;
+   }
+
+   void connection::send_time() {
+      time_message xpkt;
+      xpkt.org = rec;
+      xpkt.rec = dst;
+      xpkt.xmt = get_time();
+      org = xpkt.xmt;
+      enqueue(xpkt);
+   }
+
+   void connection::send_time(const time_message& msg) {
+      time_message xpkt;
+      xpkt.org = msg.xmt;
+      xpkt.rec = msg.dst;
+      xpkt.xmt = get_time();
+      enqueue(xpkt);
+   }
+
+   void connection::queue_write(std::shared_ptr<vector<char>> buff,
+                                bool trigger_send,
+                                std::function<void(boost::system::error_code, std::size_t)> callback) {
+      write_queue.push_back({buff, callback});
+      if(out_queue.empty() && trigger_send)
+         do_queue_write();
+   }
+
+   void connection::do_queue_write() {
+      if(write_queue.empty() || !out_queue.empty())
+         return;
+      connection_wptr c(shared_from_this());
+      if(!socket->is_open()) {
+         fc_elog(logger,"socket not open to ${p}",("p",peer_name()));
+         my_impl->close(c.lock());
+         return;
+      }
+      std::vector<boost::asio::const_buffer> bufs;
+      while (write_queue.size() > 0) {
+         auto& m = write_queue.front();
+         bufs.push_back(boost::asio::buffer(*m.buff));
+         out_queue.push_back(m);
+         write_queue.pop_front();
+      }
+      boost::asio::async_write(*socket, bufs, [c](boost::system::error_code ec, std::size_t w) {
+         try {
+            auto conn = c.lock();
+            if(!conn)
+               return;
+
+            for (auto& m: conn->out_queue) {
+               m.callback(ec, w);
+            }
+
+            if(ec) {
+               string pname = conn ? conn->peer_name() : "no connection name";
+               if( ec.value() != boost::asio::error::eof) {
+                  elog("Error sending to peer ${p}: ${i}", ("p",pname)("i", ec.message()));
+               }
+               else {
+                  ilog("connection closure detected on write to ${p}",("p",pname));
+               }
+               my_impl->close(conn);
+               return;
+            }
+            while (conn->out_queue.size() > 0) {
+               conn->out_queue.pop_front();
+            }
+//            conn->enqueue_sync_block();
+            conn->do_queue_write();
+         }
+         catch(const std::exception &ex) {
+            auto conn = c.lock();
+            string pname = conn ? conn->peer_name() : "no connection name";
+            elog("Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.what()));
+         }
+         catch(const fc::exception &ex) {
+            auto conn = c.lock();
+            string pname = conn ? conn->peer_name() : "no connection name";
+            elog("Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.to_string()));
+         }
+         catch(...) {
+            auto conn = c.lock();
+            string pname = conn ? conn->peer_name() : "no connection name";
+            elog("Exception in do_queue_write to ${p}", ("p",pname) );
+         }
+      });
+   }
+
+
+   void connection::enqueue( const ibc_message &m, bool trigger_send ) {
+      go_away_reason close_after_send = no_reason;
+      if (m.contains<go_away_message>()) {
+         close_after_send = m.get<go_away_message>().reason;
+      }
+
+      uint32_t payload_size = fc::raw::pack_size( m );
+      char * header = reinterpret_cast<char*>(&payload_size);
+      size_t header_size = sizeof(payload_size);
+
+      size_t buffer_size = header_size + payload_size;
+
+      auto send_buffer = std::make_shared<vector<char>>(buffer_size);
+      fc::datastream<char*> ds( send_buffer->data(), buffer_size);
+      ds.write( header, header_size );
+      fc::raw::pack( ds, m );
+      connection_wptr weak_this = shared_from_this();
+      queue_write(send_buffer,trigger_send,
+                  [weak_this, close_after_send](boost::system::error_code ec, std::size_t ) {
+                     connection_ptr conn = weak_this.lock();
+                     if (conn) {
+                        if (close_after_send != no_reason) {
+                           elog ("sent a go away message: ${r}, closing connection to ${p}",("r", reason_str(close_after_send))("p", conn->peer_name()));
+                           my_impl->close(conn);
+                           return;
+                        }
+                     } else {
+                        fc_wlog(logger, "connection expired before enqueued ibc_message called callback!");
+                     }
+                  });
+   }
+
+   const string connection::peer_name() {
+      if( !last_handshake_recv.p2p_address.empty() ) {
+         return last_handshake_recv.p2p_address;
+      }
+      if( !peer_addr.empty() ) {
+         return peer_addr;
+      }
+      return "connecting client";
+   }
+
+
+
+   bool connection::process_next_message(ibc_plugin_impl& impl, uint32_t message_length) {
+      try {
+         // If it is a signed_block, then save the raw message for the cache
+         // This must be done before we unpack the message.
+         // This code is copied from fc::io::unpack(..., unsigned_int)
+         auto index = pending_message_buffer.read_index();
+         uint64_t which = 0; char b = 0; uint8_t by = 0;
+         do {
+            pending_message_buffer.peek(&b, 1, index);
+            which |= uint32_t(uint8_t(b) & 0x7f) << by;
+            by += 7;
+         } while( uint8_t(b) & 0x80 && by < 32);
+
+//         if (which == uint64_t(ibc_message::tag<signed_block>::value)) {
+//            blk_buffer.resize(message_length);
+//            auto index = pending_message_buffer.read_index();
+//            pending_message_buffer.peek(blk_buffer.data(), message_length, index);
+//         }
+         auto ds = pending_message_buffer.create_datastream();
+         ibc_message msg;
+         fc::raw::unpack(ds, msg);
+         msgHandler m(impl, shared_from_this() );
+         msg.visit(m);
+      } catch(  const fc::exception& e ) {
+         edump((e.to_detail_string() ));
+         impl.close( shared_from_this() );
+         return false;
+      }
+      return true;
+   }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   //--------------- ibc_plugin_impl ---------------
+   void ibc_plugin_impl::connect( connection_ptr c ) {
+
+   }
+
+   
+   void ibc_plugin_impl::accepted_block_header(const block_state_ptr& block) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+      ilog ("======== 11 ===============");
+   }
+
+   void ibc_plugin_impl::accepted_block(const block_state_ptr& block) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+//      dispatcher->bcast_block(*block->block);
+      ilog ("======== 22 ===============");
+   }
+
+   void ibc_plugin_impl::irreversible_block(const block_state_ptr&block) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+      ilog ("======== 33 ===============");
+   }
+
+   void ibc_plugin_impl::accepted_transaction(const transaction_metadata_ptr& md) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", md->id));
+//      dispatcher->bcast_transaction(md->packed_trx);
+      ilog ("======== 44 ===============");
+   }
+
+   void ibc_plugin_impl::applied_transaction(const transaction_trace_ptr& txn) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", txn->id));
+      ilog ("======== 55 ===============");
+   }
+
+   void ibc_plugin_impl::accepted_confirmation(const header_confirmation& head) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", head.block_id));
+      ilog ("======== 66 ===============");
+   }
+
+
+   void ibc_plugin_impl::ticker() {
+      keepalive_timer->expires_from_now (keepalive_interval);
+      keepalive_timer->async_wait ([this](boost::system::error_code ec) {
+         ticker ();
+         if (ec) {
+            wlog ("Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
+         }
+//         for (auto &c : connections ) {
+//            if (c->socket->is_open()) {
+//               c->send_time();
+//            }
+//         }
+      });
+   }
+
+   void ibc_plugin_impl::start_monitors() {
+
+   }
+
+   bool ibc_plugin_impl::start_session( connection_ptr con ) {
+      ilog(" ======= start session =======");
+
+      boost::asio::ip::tcp::no_delay nodelay( true );
+      boost::system::error_code ec;
+      con->socket->set_option( nodelay, ec );
+      if (ec) {
+         elog( "connection failed to ${peer}: ${error}",
+               ( "peer", con->peer_name())("error",ec.message()));
+         con->connecting = false;
+         close(con);
+         return false;
+      }
+      else {
+         start_read_message( con );
+         ++started_sessions;
+         return true;
+         // for now, we can just use the application main loop.
+         //     con->readloop_complete  = bf::async( [=](){ read_loop( con ); } );
+         //     con->writeloop_complete = bf::async( [=](){ write_loop con ); } );
+      }
+   }
+
+   void ibc_plugin_impl::start_listen_loop( ) {
+      auto socket = std::make_shared<tcp::socket>( std::ref( app().get_io_service() ) );
+      acceptor->async_accept( *socket, [socket,this]( boost::system::error_code ec ) {
+      ilog ("======== i hear something ===============");
+
+         if( !ec ) {
+            uint32_t visitors = 0;
+            uint32_t from_addr = 0;
+            auto paddr = socket->remote_endpoint(ec).address();
+            if (ec) {
+               fc_elog(logger,"Error getting remote endpoint: ${m}",("m", ec.message()));
+            }
+            else {
+               for (auto &conn : connections) {
+                  if(conn->socket->is_open()) {
+                     if (conn->peer_addr.empty()) {
+                        visitors++;
+                        boost::system::error_code ec;
+                        if (paddr == conn->socket->remote_endpoint(ec).address()) {
+                           from_addr++;
+                        }
+                     }
+                  }
+               }
+               if (num_clients != visitors) {
+                  ilog ("checking max client, visitors = ${v} num clients ${n}",("v",visitors)("n",num_clients));
+                  num_clients = visitors;
+               }
+               if( from_addr < max_nodes_per_host && (max_client_count == 0 || num_clients < max_client_count )) {
+                  ++num_clients;
+                  connection_ptr c = std::make_shared<connection>( socket );
+                  connections.insert( c );
+                  start_session( c );
+
+               }
+               else {
+                  if (from_addr >= max_nodes_per_host) {
+                     fc_elog(logger, "Number of connections (${n}) from ${ra} exceeds limit",
+                             ("n", from_addr+1)("ra",paddr.to_string()));
+                  }
+                  else {
+                     fc_elog(logger, "Error max_client_count ${m} exceeded",
+                             ( "m", max_client_count) );
+                  }
+                  socket->close( );
+               }
+            }
+         } else {
+            elog( "Error accepting connection: ${m}",( "m", ec.message() ) );
+            // For the listed error codes below, recall start_listen_loop()
+            switch (ec.value()) {
+               case ECONNABORTED:
+               case EMFILE:
+               case ENFILE:
+               case ENOBUFS:
+               case ENOMEM:
+               case EPROTO:
+                  break;
+               default:
+                  return;
+            }
+         }
+         start_listen_loop();
+      });
+   }
+
+
+   void ibc_plugin_impl::start_read_message( connection_ptr conn ) {
+      ilog ("======== start_read_message ===============");
+      try {
+         if(!conn->socket) {
+            return;
+         }
+         connection_wptr weak_conn = conn;
+
+         std::size_t minimum_read = conn->outstanding_read_bytes ? *conn->outstanding_read_bytes : message_header_size;
+
+         if (use_socket_read_watermark) {
+            const size_t max_socket_read_watermark = 4096;
+            std::size_t socket_read_watermark = std::min<std::size_t>(minimum_read, max_socket_read_watermark);
+            boost::asio::socket_base::receive_low_watermark read_watermark_opt(socket_read_watermark);
+            conn->socket->set_option(read_watermark_opt);
+         }
+
+         auto completion_handler = [minimum_read](boost::system::error_code ec, std::size_t bytes_transferred) -> std::size_t {
+            if (ec || bytes_transferred >= minimum_read ) {
+               return 0;
+            } else {
+               return minimum_read - bytes_transferred;
+            }
+         };
+
+         boost::asio::async_read(*conn->socket,
+                                 conn->pending_message_buffer.get_buffer_sequence_for_boost_async_read(), completion_handler,
+                                 [this,weak_conn]( boost::system::error_code ec, std::size_t bytes_transferred ) {
+                                    auto conn = weak_conn.lock();
+                                    if (!conn) {
+                                       return;
+                                    }
+
+                                    conn->outstanding_read_bytes.reset();
+
+                                    try {
+                                       if( !ec ) {
+                                          if (bytes_transferred > conn->pending_message_buffer.bytes_to_write()) {
+                                             elog("async_read_some callback: bytes_transfered = ${bt}, buffer.bytes_to_write = ${btw}",
+                                                  ("bt",bytes_transferred)("btw",conn->pending_message_buffer.bytes_to_write()));
+                                          }
+                                          EOS_ASSERT(bytes_transferred <= conn->pending_message_buffer.bytes_to_write(), plugin_exception, "");
+                                          conn->pending_message_buffer.advance_write_ptr(bytes_transferred);
+                                          while (conn->pending_message_buffer.bytes_to_read() > 0) {
+                                             uint32_t bytes_in_buffer = conn->pending_message_buffer.bytes_to_read();
+
+                                             if (bytes_in_buffer < message_header_size) {
+                                                conn->outstanding_read_bytes.emplace(message_header_size - bytes_in_buffer);
+                                                break;
+                                             } else {
+                                                uint32_t message_length;
+                                                auto index = conn->pending_message_buffer.read_index();
+                                                conn->pending_message_buffer.peek(&message_length, sizeof(message_length), index);
+                                                if(message_length > def_send_buffer_size*2 || message_length == 0) {
+                                                   boost::system::error_code ec;
+                                                   elog("incoming message length unexpected (${i}), from ${p}", ("i", message_length)("p",boost::lexical_cast<std::string>(conn->socket->remote_endpoint(ec))));
+                                                   close(conn);
+                                                   return;
+                                                }
+
+                                                auto total_message_bytes = message_length + message_header_size;
+
+                                                if (bytes_in_buffer >= total_message_bytes) {
+                                                   conn->pending_message_buffer.advance_read_ptr(message_header_size);
+                                                   if (!conn->process_next_message(*this, message_length)) {
+                                                      return;
+                                                   }
+                                                } else {
+                                                   auto outstanding_message_bytes = total_message_bytes - bytes_in_buffer;
+                                                   auto available_buffer_bytes = conn->pending_message_buffer.bytes_to_write();
+                                                   if (outstanding_message_bytes > available_buffer_bytes) {
+                                                      conn->pending_message_buffer.add_space( outstanding_message_bytes - available_buffer_bytes );
+                                                   }
+
+                                                   conn->outstanding_read_bytes.emplace(outstanding_message_bytes);
+                                                   break;
+                                                }
+                                             }
+                                          }
+                                          start_read_message(conn);
+                                       } else {
+                                          auto pname = conn->peer_name();
+                                          if (ec.value() != boost::asio::error::eof) {
+                                             elog( "Error reading message from ${p}: ${m}",("p",pname)( "m", ec.message() ) );
+                                          } else {
+                                             ilog( "Peer ${p} closed connection",("p",pname) );
+                                          }
+                                          close( conn );
+                                       }
+                                    }
+                                    catch(const std::exception &ex) {
+                                       string pname = conn ? conn->peer_name() : "no connection name";
+                                       elog("Exception in handling read data from ${p} ${s}",("p",pname)("s",ex.what()));
+                                       close( conn );
+                                    }
+                                    catch(const fc::exception &ex) {
+                                       string pname = conn ? conn->peer_name() : "no connection name";
+                                       elog("Exception in handling read data ${s}", ("p",pname)("s",ex.to_string()));
+                                       close( conn );
+                                    }
+                                    catch (...) {
+                                       string pname = conn ? conn->peer_name() : "no connection name";
+                                       elog( "Undefined exception hanlding the read data from connection ${p}",( "p",pname));
+                                       close( conn );
+                                    }
+                                 } );
+      } catch (...) {
+         string pname = conn ? conn->peer_name() : "no connection name";
+         elog( "Undefined exception handling reading ${p}",("p",pname) );
+         close( conn );
+      }
+   }
+
+   void ibc_plugin_impl::close( connection_ptr c ) {
+      if( c->peer_addr.empty( ) && c->socket->is_open() ) {
+         if (num_clients == 0) {
+            fc_wlog( logger, "num_clients already at 0");
+         }
+         else {
+            --num_clients;
+         }
+      }
+      c->close();
+   }
 
    
    ibc_plugin::ibc_plugin()
@@ -276,6 +1009,7 @@ namespace eosio { namespace ibc {
          ( "ibc-max-clients", bpo::value<int>()->default_value(def_max_clients), "Maximum number of clients from which connections are accepted, use 0 for no limit")
          ( "ibc-connection-cleanup-period", bpo::value<int>()->default_value(def_conn_retry_wait), "number of seconds to wait before cleaning up dead connections")
          ( "ibc-max-cleanup-time-msec", bpo::value<int>()->default_value(10), "max connection cleanup time per cleanup call in millisec")
+         ( "ibc-version-match", bpo::value<bool>()->default_value(false), "True to require exact match of ibc plugin version.")
          ( "ibc-sync-fetch-span", bpo::value<uint32_t>()->default_value(def_sync_fetch_span), "number of blocks headers to retrieve in a chunk from any individual peer during synchronization")
          ( "ibc-use-socket-read-watermark", bpo::value<bool>()->default_value(false), "Enable expirimental socket read watermark optimization")
          ( "ibc-log-format", bpo::value<string>()->default_value( "[\"${_name}\" ${_ip}:${_port}]" ),
@@ -297,11 +1031,13 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin::plugin_initialize( const variables_map& options ) {
-      ilog("Initialize net plugin");
+      ilog("Initialize ibc plugin");
       try {
          peer_log_format = options.at( "ibc-log-format" ).as<string>();
 
-         my->sync_master.reset( new sync_manager( options.at( "ibc-sync-fetch-span" ).as<uint32_t>()));
+         my->network_version_match = options.at( "ibc-version-match" ).as<bool>();
+
+//         my->sync_master.reset( new sync_manager( options.at( "ibc-sync-fetch-span" ).as<uint32_t>()));
          my->dispatcher.reset( new dispatch_manager );
 
          my->connector_period = std::chrono::seconds( options.at( "ibc-connection-cleanup-period" ).as<int>());
@@ -316,16 +1052,15 @@ namespace eosio { namespace ibc {
          my->use_socket_read_watermark = options.at( "ibc-use-socket-read-watermark" ).as<bool>();
 
          my->resolver = std::make_shared<tcp::resolver>( std::ref( app().get_io_service()));
+
          if( options.count( "ibc-listen-endpoint" )) {
             my->p2p_address = options.at( "ibc-listen-endpoint" ).as<string>();
             auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
             auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
             idump((host)( port ));
             tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
-            // Note: need to add support for IPv6 too?
 
             my->listen_endpoint = *my->resolver->resolve( query );
-
             my->acceptor.reset( new tcp::acceptor( app().get_io_service()));
          }
 
@@ -336,33 +1071,91 @@ namespace eosio { namespace ibc {
                boost::system::error_code ec;
                auto host = host_name( ec );
                if( ec.value() != boost::system::errc::success ) {
-
-                  FC_THROW_EXCEPTION( fc::invalid_arg_exception,
-                                      "Unable to retrieve host_name. ${msg}", ("msg", ec.message()));
-
+                  FC_THROW_EXCEPTION( fc::invalid_arg_exception, "Unable to retrieve host_name. ${msg}", ("msg", ec.message()));
                }
                auto port = my->p2p_address.substr( my->p2p_address.find( ':' ), my->p2p_address.size());
                my->p2p_address = host + port;
             }
          }
 
+         if( options.count( "ibc-peer-address" )) {
+            my->supplied_peers = options.at( "ibc-peer-address" ).as<vector<string> >();
+         }
 
+         if( options.count( "ibc-agent-name" )) {
+            my->user_agent_name = options.at( "ibc-agent-name" ).as<string>();
+         }
 
+         if( options.count( "ibc-allowed-connection" )) {
+            const std::vector<std::string> allowed_remotes = options["ibc-allowed-connection"].as<std::vector<std::string>>();
+            for( const std::string& allowed_remote : allowed_remotes ) {
+//               if( allowed_remote == "any" )
+//                  my->allowed_connections |= ibc_plugin_impl::Any;
+//               else if( allowed_remote == "producers" )
+//                  my->allowed_connections |= ibc_plugin_impl::Producers;
+//               else if( allowed_remote == "specified" )
+//                  my->allowed_connections |= ibc_plugin_impl::Specified;
+//               else if( allowed_remote == "none" )
+//                  my->allowed_connections = ibc_plugin_impl::None;
+            }
+         }
 
+         if( my->allowed_connections & ibc_plugin_impl::Specified )
+            EOS_ASSERT( options.count( "ibc-peer-key" ), plugin_config_exception,
+                        "At least one ibc-peer-key must accompany 'ibc-allowed-connection=specified'" );
 
+         if( options.count( "ibc-peer-key" )) {
+            const std::vector<std::string> key_strings = options["ibc-peer-key"].as<std::vector<std::string>>();
+            for( const std::string& key_string : key_strings ) {
+               my->allowed_peers.push_back( dejsonify<chain::public_key_type>( key_string ));
+            }
+         }
 
+         if( options.count( "ibc-peer-private-key" )) {
+            const std::vector<std::string> key_id_to_wif_pair_strings = options["ibc-peer-private-key"].as<std::vector<std::string>>();
+            for( const std::string& key_id_to_wif_pair_string : key_id_to_wif_pair_strings ) {
+               auto key_id_to_wif_pair = dejsonify<std::pair<chain::public_key_type, std::string>>(
+                  key_id_to_wif_pair_string );
+               my->private_keys[key_id_to_wif_pair.first] = fc::crypto::private_key( key_id_to_wif_pair.second );
+            }
+         }
 
+         my->chain_plug = app().find_plugin<chain_plugin>();
+         EOS_ASSERT( my->chain_plug, chain::missing_chain_plugin_exception, "" );
+         my->chain_id = app().get_plugin<chain_plugin>().get_chain_id();
 
+//         my->node_id = ;
 
-
-
-
-
+         my->keepalive_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
+         my->ticker();
       } FC_LOG_AND_RETHROW()
    }
 
    void ibc_plugin::plugin_startup() {
+      if( my->acceptor ) {
+         my->acceptor->open(my->listen_endpoint.protocol());
+         my->acceptor->set_option(tcp::acceptor::reuse_address(true));
+         try {
+            my->acceptor->bind(my->listen_endpoint);
+         } catch (const std::exception& e) {
+            ilog("ibc_plugin::plugin_startup failed to bind to port ${port}", ("port", my->listen_endpoint.port()));
+            throw e;
+         }
+         my->acceptor->listen();
+         ilog("starting ibc plugin listener, max clients is ${mc}",("mc",my->max_client_count));
+         my->start_listen_loop();
+      }
+      chain::controller&cc = my->chain_plug->chain();
+      cc.irreversible_block.connect( boost::bind(&ibc_plugin_impl::irreversible_block, my.get(), _1));
 
+      my->start_monitors();
+
+      for( auto seed_node : my->supplied_peers ) {
+         connect( seed_node );
+      }
+
+//      if(fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
+//         logger = fc::get_logger_map()[logger_name];
    }
 
    void ibc_plugin::plugin_shutdown() {
