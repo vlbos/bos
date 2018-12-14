@@ -243,18 +243,18 @@ namespace eosio { namespace ibc {
     *  git log | grep "^commit" | awk '{print substr($2,5,4)}' | sort -u > sorted.txt
     *  rm -f gap.txt; prev=0; for a in $(cat sorted.txt); do echo $prev $((0x$a - 0x$prev)) $a >> gap.txt; prev=$a; done; sort -k2 -n gap.txt | tail
     *
-    *  DO NOT EDIT net_version_base OR net_version_range!
+    *  DO NOT EDIT ibc_version_base OR ibc_version_range!
     */
-   constexpr uint16_t net_version_base = 0x04b5;
-   constexpr uint16_t net_version_range = 106;
+   constexpr uint16_t ibc_version_base = 0x04b5;
+   constexpr uint16_t ibc_version_range = 106;
    /**
-    *  If there is a change to network protocol or behavior, increment net version to identify
+    *  If there is a change to network protocol or behavior, increment ibc version to identify
     *  the need for compatibility hooks
     */
    constexpr uint16_t proto_base = 0;
    constexpr uint16_t proto_explicit_sync = 1;
 
-   constexpr uint16_t net_version = proto_explicit_sync;
+   constexpr uint16_t ibc_version = proto_explicit_sync;
 
 
    struct handshake_initializer {
@@ -714,60 +714,12 @@ namespace eosio { namespace ibc {
 
 
    //--------------- ibc_plugin_impl ---------------
+
    void ibc_plugin_impl::connect( connection_ptr c ) {
 
    }
 
-   
-   void ibc_plugin_impl::accepted_block_header(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
-      ilog ("======== 11 ===============");
-   }
-
-   void ibc_plugin_impl::accepted_block(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
-//      dispatcher->bcast_block(*block->block);
-      ilog ("======== 22 ===============");
-   }
-
-   void ibc_plugin_impl::irreversible_block(const block_state_ptr&block) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
-      ilog ("======== 33 ===============");
-   }
-
-   void ibc_plugin_impl::accepted_transaction(const transaction_metadata_ptr& md) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", md->id));
-//      dispatcher->bcast_transaction(md->packed_trx);
-      ilog ("======== 44 ===============");
-   }
-
-   void ibc_plugin_impl::applied_transaction(const transaction_trace_ptr& txn) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", txn->id));
-      ilog ("======== 55 ===============");
-   }
-
-   void ibc_plugin_impl::accepted_confirmation(const header_confirmation& head) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", head.block_id));
-      ilog ("======== 66 ===============");
-   }
-
-
-   void ibc_plugin_impl::ticker() {
-      keepalive_timer->expires_from_now (keepalive_interval);
-      keepalive_timer->async_wait ([this](boost::system::error_code ec) {
-         ticker ();
-         if (ec) {
-            wlog ("Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
-         }
-//         for (auto &c : connections ) {
-//            if (c->socket->is_open()) {
-//               c->send_time();
-//            }
-//         }
-      });
-   }
-
-   void ibc_plugin_impl::start_monitors() {
+   void ibc_plugin_impl::connect( connection_ptr c, tcp::resolver::iterator endpoint_itr ) {
 
    }
 
@@ -797,7 +749,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::start_listen_loop( ) {
       auto socket = std::make_shared<tcp::socket>( std::ref( app().get_io_service() ) );
       acceptor->async_accept( *socket, [socket,this]( boost::system::error_code ec ) {
-      ilog ("======== i hear something ===============");
+         ilog ("======== i hear something ===============");
 
          if( !ec ) {
             uint32_t visitors = 0;
@@ -859,7 +811,6 @@ namespace eosio { namespace ibc {
          start_listen_loop();
       });
    }
-
 
    void ibc_plugin_impl::start_read_message( connection_ptr conn ) {
       ilog ("======== start_read_message ===============");
@@ -974,6 +925,58 @@ namespace eosio { namespace ibc {
       }
    }
 
+   size_t ibc_plugin_impl::count_open_sockets() const {
+
+   }
+
+   template<typename VerifierFunc>
+   void ibc_plugin_impl::send_all( const ibc_message &msg, VerifierFunc verify) {
+      for( auto &c : connections) {
+         if( c->current() && verify( c)) {
+            c->enqueue( msg );
+         }
+      }
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const handshake_message &msg) {
+
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const go_away_message &msg ) {
+
+   }
+
+   void ibc_plugin_impl::handle_message(connection_ptr c, const time_message &msg) {
+
+   }
+
+   void ibc_plugin_impl::start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection) {
+
+   }
+
+   void ibc_plugin_impl::ticker() {
+      keepalive_timer->expires_from_now (keepalive_interval);
+      keepalive_timer->async_wait ([this](boost::system::error_code ec) {
+         ticker ();
+         if (ec) {
+            wlog ("Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
+         }
+//         for (auto &c : connections ) {
+//            if (c->socket->is_open()) {
+//               c->send_time();
+//            }
+//         }
+      });
+   }
+
+   void ibc_plugin_impl::start_monitors() {
+
+   }
+
+   void ibc_plugin_impl::connection_monitor(std::weak_ptr<connection> from_connection) {
+
+   }
+
    void ibc_plugin_impl::close( connection_ptr c ) {
       if( c->peer_addr.empty( ) && c->socket->is_open() ) {
          if (num_clients == 0) {
@@ -986,7 +989,76 @@ namespace eosio { namespace ibc {
       c->close();
    }
 
-   
+   bool ibc_plugin_impl::is_valid( const handshake_message &msg) {
+
+   }
+
+   void ibc_plugin_impl::accepted_block_header(const block_state_ptr& block) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+      ilog ("======== 11 ===============");
+   }
+
+   void ibc_plugin_impl::accepted_block(const block_state_ptr& block) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+//      dispatcher->bcast_block(*block->block);
+      ilog ("======== 22 ===============");
+   }
+
+   void ibc_plugin_impl::irreversible_block(const block_state_ptr&block) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+      ilog ("======== 33 ===============");
+   }
+
+   void ibc_plugin_impl::accepted_transaction(const transaction_metadata_ptr& md) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", md->id));
+//      dispatcher->bcast_transaction(md->packed_trx);
+      ilog ("======== 44 ===============");
+   }
+
+   void ibc_plugin_impl::applied_transaction(const transaction_trace_ptr& txn) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", txn->id));
+      ilog ("======== 55 ===============");
+   }
+
+   void ibc_plugin_impl::accepted_confirmation(const header_confirmation& head) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", head.block_id));
+      ilog ("======== 66 ===============");
+   }
+
+   bool ibc_plugin_impl::authenticate_peer(const handshake_message& msg) const {
+
+   }
+
+   chain::public_key_type ibc_plugin_impl::get_authentication_key() const {
+
+   }
+
+   chain::signature_type ibc_plugin_impl::sign_compact(const chain::public_key_type& signer, const fc::sha256& digest) const {
+
+   }
+
+   connection_ptr ibc_plugin_impl::find_connection( string host )const {
+      for( const auto& c : connections )
+         if( c->peer_addr == host ) return c;
+      return connection_ptr();
+   }
+
+   uint16_t ibc_plugin_impl::to_protocol_version (uint16_t v) {
+      if (v >= ibc_version_base) {
+         v -= ibc_version_base;
+         return (v > ibc_version_range) ? 0 : v;
+      }
+      return 0;
+   }
+
+   //--------------- handshake_initializer ---------------
+
+   void handshake_initializer::populate( handshake_message &hello) {
+
+   }
+
+   //--------------- ibc_plugin ---------------
+
    ibc_plugin::ibc_plugin()
       :my( new ibc_plugin_impl ) {
       my_impl = my.get();
@@ -1154,35 +1226,76 @@ namespace eosio { namespace ibc {
          connect( seed_node );
       }
 
-//      if(fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
-//         logger = fc::get_logger_map()[logger_name];
+      if(fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
+         logger = fc::get_logger_map()[logger_name];
    }
 
    void ibc_plugin::plugin_shutdown() {
+      try {
+         ilog( "shutdown.." );
+         my->done = true;
+         if( my->acceptor ) {
+            ilog( "close acceptor" );
+            my->acceptor->close();
 
+            ilog( "close ${s} connections",( "s",my->connections.size()) );
+            auto cons = my->connections;
+            for( auto con : cons ) {
+               my->close( con);
+            }
+
+            my->acceptor.reset(nullptr);
+         }
+         ilog( "exit shutdown" );
+      }
+      FC_CAPTURE_AND_RETHROW()
    }
 
    size_t ibc_plugin::num_peers() const {
-
+      return my->count_open_sockets();
    }
 
    /**
     *  Used to trigger a new connection from RPC API
     */
    string ibc_plugin::connect( const string& host ) {
+      if( my->find_connection( host ) )
+         return "already connected";
 
+      connection_ptr c = std::make_shared<connection>(host);
+      fc_dlog(logger,"adding new connection to the list");
+      my->connections.insert( c );
+      fc_dlog(logger,"calling active connector");
+      my->connect( c );
+      return "added connection";
    }
 
    string ibc_plugin::disconnect( const string& host ) {
-
+      for( auto itr = my->connections.begin(); itr != my->connections.end(); ++itr ) {
+         if( (*itr)->peer_addr == host ) {
+            (*itr)->reset();
+            my->close(*itr);
+            my->connections.erase(itr);
+            return "connection removed";
+         }
+      }
+      return "no known connection for host";
    }
 
    optional<connection_status> ibc_plugin::status( const string& host )const {
-
+      auto con = my->find_connection( host );
+      if( con )
+         return con->get_status();
+      return optional<connection_status>();
    }
 
    vector<connection_status> ibc_plugin::connections()const {
-
+      vector<connection_status> result;
+      result.reserve( my->connections.size() );
+      for( const auto& c : my->connections ) {
+         result.push_back( c->get_status() );
+      }
+      return result;
    }
 
 }}
