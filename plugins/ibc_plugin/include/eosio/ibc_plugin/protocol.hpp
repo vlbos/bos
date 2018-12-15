@@ -83,10 +83,45 @@ namespace eosio {
          mutable tstamp  dst;       //!< destination timestamp
       };
 
+      /**
+       * lwc means eosio light weight client
+       */
+
+      struct lwc_init_message {
+         signed_block_header     header;
+         producer_schedule_type  active_schedule;
+         incremental_merkle      blockroot_merkle;
+      };
+
+      struct lwc_section_message {
+         std::vector<signed_block_header>    headers;
+         incremental_merkle                  blockroot_merkle;
+      };
+
+      struct lwc_section_info_message {
+         uint32_t       first;
+         block_id_type  first_id;
+         uint32_t       lib;
+         block_id_type  lib_id;
+         uint32_t       last;
+         block_id_type  last_id;
+         bool           valid;
+      };
+
+      struct lwc_section_ids_message {
+         uint32_t    block_num_start;
+         uint32_t    block_num_end;
+         std::vector<block_id_type> ids;
+      };
+
 
       using ibc_message = static_variant< handshake_message,
                                           go_away_message,
-                                          time_message >;
+                                          time_message,
+                                          lwc_init_message,
+                                          lwc_section_message,
+                                          lwc_section_info_message,
+                                          lwc_section_ids_message >;
 
    } // namespace ibc
 } // namespace eosio
@@ -101,72 +136,10 @@ FC_REFLECT( eosio::ibc::handshake_message,
 FC_REFLECT( eosio::ibc::go_away_message, (reason)(node_id) )
 FC_REFLECT( eosio::ibc::time_message, (org)(rec)(xmt)(dst) )
 
-
-/**
- *
-Goals of Network Code
-1. low latency to minimize missed blocks and potentially reduce block interval
-2. minimize redundant data between blocks and transactions.
-3. enable rapid sync of a new node
-4. update to new boost / fc
+FC_REFLECT( eosio::ibc::lwc_init_message, (header)(active_schedule)(blockroot_merkle) )
+FC_REFLECT( eosio::ibc::lwc_section_message, (headers)(blockroot_merkle) )
+FC_REFLECT( eosio::ibc::lwc_section_info_message, (first)(first_id)(lib)(lib_id)(last)(last_id)(valid) )
+FC_REFLECT( eosio::ibc::lwc_section_ids_message, (block_num_start)(block_num_end)(ids) )
 
 
-State:
-   All nodes know which blocks and transactions they have
-   All nodes know which blocks and transactions their peers have
-   A node knows which blocks and transactions it has requested
-   All nodes know when they learned of a transaction
 
-   send hello message
-   write loop (true)
-      if peer knows the last irreversible block {
-         if peer does not know you know a block or transactions
-            send the ids you know (so they don't send it to you)
-            yield continue
-         if peer does not know about a block
-            send transactions in block peer doesn't know then send block summary
-            yield continue
-         if peer does not know about new public endpoints that you have verified
-            relay new endpoints to peer
-            yield continue
-         if peer does not know about transactions
-            sends the oldest transactions that is not known by the remote peer
-            yield continue
-         wait for new validated block, transaction, or peer signal from network fiber
-      } else {
-         we assume peer is in sync mode in which case it is operating on a
-         request / response basis
-
-         wait for notice of sync from the read loop
-      }
-
-
-    read loop
-      if hello message
-         verify that peers Last Ir Block is in our state or disconnect, they are on fork
-         verify peer network protocol
-
-      if notice message update list of transactions known by remote peer
-      if trx message then insert into global state as unvalidated
-      if blk summary message then insert into global state *if* we know of all dependent transactions
-         else close connection
-
-
-    if my head block < the LIB of a peer and my head block age > block interval * round_size/2 then
-    enter sync mode...
-        divide the block numbers you need to fetch among peers and send fetch request
-        if peer does not respond to request in a timely manner then make request to another peer
-        ensure that there is a constant queue of requests in flight and everytime a request is filled
-        send of another request.
-
-     Once you have caught up to all peers, notify all peers of your head block so they know that you
-     know the LIB and will start sending you real time transactions
-
-parallel fetches, request in groups
-
-
-only relay transactions to peers if we don't already know about it.
-
-send a notification rather than a transaction if the txn is > 3mtu size.
-
-*/

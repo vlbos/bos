@@ -121,7 +121,7 @@ namespace eosio { namespace ibc {
       void connect( connection_ptr c, tcp::resolver::iterator endpoint_itr );
       bool start_session( connection_ptr c );
       void start_listen_loop( );
-      void start_read_message( connection_ptr c);
+      void start_read_message( connection_ptr c );
 
       void   close( connection_ptr c );
       size_t count_open_sockets() const;
@@ -151,6 +151,12 @@ namespace eosio { namespace ibc {
        */
       void handle_message( connection_ptr c, const time_message &msg);
 
+      void handle_message( connection_ptr c, const lwc_init_message &msg);
+      void handle_message( connection_ptr c, const lwc_section_message &msg);
+      void handle_message( connection_ptr c, const lwc_section_info_message &msg);
+      void handle_message( connection_ptr c, const lwc_section_ids_message &msg);
+
+
       void start_conn_timer( boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection );
       void start_ibc_contract_timer( );
       void start_chain_timer( );
@@ -161,6 +167,8 @@ namespace eosio { namespace ibc {
       /** Peer heartbeat ticker.
        */
       void ticker();
+      void chain_checker();
+      void ibc_contract_checker();
       bool authenticate_peer(const handshake_message& msg) const;
 
       /** Retrieve public key used to authenticate with peers.
@@ -420,8 +428,36 @@ namespace eosio { namespace ibc {
       }
    };
 
+
+
+
+
+
    class sync_manager {
-      
+   public:
+
+      enum stages {
+         normal,
+         in_get_lwc_last_section,
+         in_sync_to_lwc
+      };
+
+      std::vector<std::pair<uint32_t,block_id_type>> lwc_last_section;
+
+
+      uint32_t    lwc_ls_first;  // light weight client last section first block number.
+      uint32_t    lwc_ls_last;
+      uint32_t    lwc_ls_lib;
+
+
+
+      void get_lwc_last_section();
+      void get_lwc_last_section_ids();
+      void append_lwc_last_section();
+      void new_lwc_section();
+
+
+
    };
 
    class dispatch_manager {
@@ -984,6 +1020,26 @@ namespace eosio { namespace ibc {
 
    }
 
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_init_message &msg) {
+
+
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_message &msg) {
+
+
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_info_message &msg) {
+
+
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_ids_message &msg) {
+
+
+   }
+
    void ibc_plugin_impl::start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection) {
       connector_check->expires_from_now( du);
       connector_check->async_wait( [this, from_connection](boost::system::error_code ec) {
@@ -1017,6 +1073,32 @@ namespace eosio { namespace ibc {
          }
          ilog("=====  start_chain_timer  =====");
       });
+   }
+
+   void ibc_plugin_impl::chain_checker() {
+      /**
+       * 检查是否是跟上状态
+       *
+       * 实时监控bp列表是否有变化
+       * 至少每个小时同步一次数据
+       */
+
+
+
+
+
+
+
+   }
+
+   void ibc_plugin_impl::ibc_contract_checker() {
+      //检查是否是跟上状态
+
+
+
+
+
+
    }
 
    void ibc_plugin_impl::ticker() {
@@ -1093,6 +1175,10 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::irreversible_block(const block_state_ptr&block) {
+      /**
+       * 每小时记录一个blockmroot
+       */
+
       fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
       ilog ("======== 33 ======33=========");
    }
