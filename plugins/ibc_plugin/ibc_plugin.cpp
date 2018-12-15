@@ -1224,14 +1224,14 @@ namespace eosio { namespace ibc {
          if( options.count( "ibc-allowed-connection" )) {
             const std::vector<std::string> allowed_remotes = options["ibc-allowed-connection"].as<std::vector<std::string>>();
             for( const std::string& allowed_remote : allowed_remotes ) {
-//               if( allowed_remote == "any" )
-//                  my->allowed_connections |= ibc_plugin_impl::Any;
-//               else if( allowed_remote == "producers" )
-//                  my->allowed_connections |= ibc_plugin_impl::Producers;
-//               else if( allowed_remote == "specified" )
-//                  my->allowed_connections |= ibc_plugin_impl::Specified;
-//               else if( allowed_remote == "none" )
-//                  my->allowed_connections = ibc_plugin_impl::None;
+               if( allowed_remote == "any" )
+                  my->allowed_connections |= ibc_plugin_impl::Any;
+               else if( allowed_remote == "producers" )
+                  my->allowed_connections |= ibc_plugin_impl::Producers;
+               else if( allowed_remote == "specified" )
+                  my->allowed_connections |= ibc_plugin_impl::Specified;
+               else if( allowed_remote == "none" )
+                  my->allowed_connections = ibc_plugin_impl::None;
             }
          }
 
