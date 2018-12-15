@@ -93,7 +93,8 @@ namespace eosio { namespace ibc {
       unique_ptr< dispatch_manager >   dispatcher;
 
       unique_ptr<boost::asio::steady_timer> connector_check;
-      unique_ptr<boost::asio::steady_timer> transaction_check;
+      unique_ptr<boost::asio::steady_timer> contract_timer;
+      unique_ptr<boost::asio::steady_timer> chain_check;
       unique_ptr<boost::asio::steady_timer> keepalive_timer;
       boost::asio::steady_timer::duration   connector_period;
       boost::asio::steady_timer::duration   txn_exp_period;
@@ -424,6 +425,8 @@ namespace eosio { namespace ibc {
    class dispatch_manager {
 
    };
+
+
 
    //--------------- connection ---------------
    
@@ -944,7 +947,12 @@ namespace eosio { namespace ibc {
    }
 
    size_t ibc_plugin_impl::count_open_sockets() const {
-
+      size_t count = 0;
+      for( auto &c : connections) {
+         if(c->socket->is_open())
+            ++count;
+      }
+      return count;
    }
 
    template<typename VerifierFunc>
@@ -954,6 +962,10 @@ namespace eosio { namespace ibc {
             c->enqueue( msg );
          }
       }
+   }
+
+   bool ibc_plugin_impl::is_valid( const handshake_message &msg) {
+
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const handshake_message &msg) {
@@ -971,7 +983,16 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection) {
-
+      connector_check->expires_from_now( du);
+      connector_check->async_wait( [this, from_connection](boost::system::error_code ec) {
+         if( !ec) {
+            connection_monitor(from_connection);
+         }
+         else {
+            elog( "Error from connection check monitor: ${m}",( "m", ec.message()));
+            start_conn_timer( connector_period, std::weak_ptr<connection>());
+         }
+      });
    }
 
    void ibc_plugin_impl::ticker() {
@@ -990,11 +1011,33 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_monitors() {
-
+      connector_check.reset(new boost::asio::steady_timer( app().get_io_service()));
+      start_conn_timer(connector_period, std::weak_ptr<connection>());
    }
 
    void ibc_plugin_impl::connection_monitor(std::weak_ptr<connection> from_connection) {
-
+      auto max_time = fc::time_point::now();
+      max_time += fc::milliseconds(max_cleanup_time_ms);
+      auto from = from_connection.lock();
+      auto it = (from ? connections.find(from) : connections.begin());
+      if (it == connections.end()) it = connections.begin();
+      while (it != connections.end()) {
+         if (fc::time_point::now() >= max_time) {
+            start_conn_timer(std::chrono::milliseconds(1), *it); // avoid exhausting
+            return;
+         }
+         if( !(*it)->socket->is_open() && !(*it)->connecting) {
+            if( (*it)->peer_addr.length() > 0) {
+               connect(*it);
+            }
+            else {
+               it = connections.erase(it);
+               continue;
+            }
+         }
+         ++it;
+      }
+      start_conn_timer(connector_period, std::weak_ptr<connection>());
    }
 
    void ibc_plugin_impl::close( connection_ptr c ) {
@@ -1007,10 +1050,6 @@ namespace eosio { namespace ibc {
          }
       }
       c->close();
-   }
-
-   bool ibc_plugin_impl::is_valid( const handshake_message &msg) {
-
    }
 
    void ibc_plugin_impl::accepted_block_header(const block_state_ptr& block) {
@@ -1071,11 +1110,15 @@ namespace eosio { namespace ibc {
       return 0;
    }
 
+
+
    //--------------- handshake_initializer ---------------
 
    void handshake_initializer::populate( handshake_message &hello) {
 
    }
+
+
 
    //--------------- ibc_plugin ---------------
 
