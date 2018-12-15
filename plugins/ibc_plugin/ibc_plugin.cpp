@@ -295,18 +295,15 @@ namespace eosio { namespace ibc {
       handshake_message       last_handshake_sent;
       int16_t                 sent_handshake_count = 0;
       bool                    connecting = false;
-      bool                    syncing = false;
       uint16_t                protocol_version  = 0;
       string                  peer_addr;
+      unique_ptr<boost::asio::steady_timer> response_expected;
       go_away_reason          no_retry = no_reason;
-      block_id_type           fork_head;
-      uint32_t                fork_head_num = 0;
 
       connection_status get_status()const {
          connection_status stat;
          stat.peer = peer_addr;
          stat.connecting = connecting;
-         stat.syncing = syncing;
          stat.last_handshake = last_handshake_recv;
          return stat;
       }
@@ -355,24 +352,12 @@ namespace eosio { namespace ibc {
 
       const string peer_name();
 
-      void txn_send_pending(const vector<transaction_id_type> &ids);
-      void txn_send(const vector<transaction_id_type> &txn_lis);
-
-      void blk_send_branch();
-      void blk_send(const vector<block_id_type> &txn_lis);
-      void stop_send();
-
       void enqueue( const ibc_message &msg, bool trigger_send = true );
-      void cancel_sync(go_away_reason);
       void flush_queues();
-      bool enqueue_sync_block();
-      void request_sync_blocks (uint32_t start, uint32_t end);
 
       void cancel_wait();
-      void sync_wait();
-      void fetch_wait();
-      void sync_timeout(boost::system::error_code ec);
-      void fetch_timeout(boost::system::error_code ec);
+//      void sync_wait();
+//      void sync_timeout(boost::system::error_code ec);
 
       void queue_write(std::shared_ptr<vector<char>> buff,
                        bool trigger_send,
@@ -390,30 +375,30 @@ namespace eosio { namespace ibc {
        */
       bool process_next_message(ibc_plugin_impl& impl, uint32_t message_length);
       
-//         fc::optional<fc::variant_object> _logger_variant;
-//         const fc::variant_object& get_logger_variant()  {
-//            if (!_logger_variant) {
-//               boost::system::error_code ec;
-//               auto rep = socket->remote_endpoint(ec);
-//               string ip = ec ? "<unknown>" : rep.address().to_string();
-//               string port = ec ? "<unknown>" : std::to_string(rep.port());
-//
-//               auto lep = socket->local_endpoint(ec);
-//               string lip = ec ? "<unknown>" : lep.address().to_string();
-//               string lport = ec ? "<unknown>" : std::to_string(lep.port());
-//
-//               _logger_variant.emplace(fc::mutable_variant_object()
-//                                          ("_name", peer_name())
-//                                          ("_id", node_id)
-//                                          ("_sid", ((string)node_id).substr(0, 7))
-//                                          ("_ip", ip)
-//                                          ("_port", port)
-//                                          ("_lip", lip)
-//                                          ("_lport", lport)
-//               );
-//            }
-//            return *_logger_variant;
-//         }
+      fc::optional<fc::variant_object> _logger_variant;
+      const fc::variant_object& get_logger_variant()  {
+         if (!_logger_variant) {
+            boost::system::error_code ec;
+            auto rep = socket->remote_endpoint(ec);
+            string ip = ec ? "<unknown>" : rep.address().to_string();
+            string port = ec ? "<unknown>" : std::to_string(rep.port());
+
+            auto lep = socket->local_endpoint(ec);
+            string lip = ec ? "<unknown>" : lep.address().to_string();
+            string lport = ec ? "<unknown>" : std::to_string(lep.port());
+
+            _logger_variant.emplace(fc::mutable_variant_object()
+                                       ("_name", peer_name())
+                                       ("_id", node_id)
+                                       ("_sid", ((string)node_id).substr(0, 7))
+                                       ("_ip", ip)
+                                       ("_port", port)
+                                       ("_lip", lip)
+                                       ("_lport", lport)
+            );
+         }
+         return *_logger_variant;
+      }
    };
    
    struct msgHandler : public fc::visitor<void> {
@@ -477,9 +462,9 @@ namespace eosio { namespace ibc {
         connecting(false),
         protocol_version(0),
         peer_addr(endpoint),
-        no_retry(no_reason),
-        fork_head(),
-        fork_head_num(0) {
+        response_expected(),
+        no_retry(no_reason)
+   {
       wlog("created connection to ${n}", ("n", endpoint));
       initialize();
    }
@@ -493,9 +478,9 @@ namespace eosio { namespace ibc {
         connecting(true),
         protocol_version(0),
         peer_addr(),
-        no_retry(no_reason),
-        fork_head(),
-        fork_head_num(0) {
+        response_expected(),
+        no_retry(no_reason)
+   {
       wlog( "accepted network connection" );
       initialize();
    }
@@ -506,6 +491,7 @@ namespace eosio { namespace ibc {
    void connection::initialize() {
       auto *rnd = node_id.data();
       rnd[0] = 0;
+      response_expected.reset(new boost::asio::steady_timer(app().get_io_service()));
    }
 
    bool connection::connected() {
@@ -513,7 +499,7 @@ namespace eosio { namespace ibc {
    }
 
    bool connection::current() {
-      return (connected() && !syncing);
+      return connected();
    }
 
    void connection::reset() {
@@ -533,25 +519,24 @@ namespace eosio { namespace ibc {
       }
       flush_queues();
       connecting = false;
-      syncing = false;
 
       reset();
       sent_handshake_count = 0;
       last_handshake_recv = handshake_message();
       last_handshake_sent = handshake_message();
       fc_dlog(logger, "canceling wait on ${p}", ("p",peer_name()));
-//      cancel_wait();
+      cancel_wait();
       pending_message_buffer.reset();
    }
 
 
 
    void connection::send_handshake( ) {
-//      handshake_initializer::populate(last_handshake_sent);
-//      last_handshake_sent.generation = ++sent_handshake_count;
-//      fc_dlog(logger, "Sending handshake generation ${g} to ${ep}",
-//              ("g",last_handshake_sent.generation)("ep", peer_name()));
-//      enqueue(last_handshake_sent);
+      handshake_initializer::populate(last_handshake_sent);
+      last_handshake_sent.generation = ++sent_handshake_count;
+      fc_dlog(logger, "Sending handshake generation ${g} to ${ep}",
+              ("g",last_handshake_sent.generation)("ep", peer_name()));
+      enqueue(last_handshake_sent);
    }
 
    char* connection::convert_tstamp(const tstamp& t)
@@ -682,6 +667,11 @@ namespace eosio { namespace ibc {
                   });
    }
 
+   void connection::cancel_wait() {
+      if (response_expected)
+         response_expected->cancel();
+   }
+
    const string connection::peer_name() {
       if( !last_handshake_recv.p2p_address.empty() ) {
          return last_handshake_recv.p2p_address;
@@ -706,13 +696,6 @@ namespace eosio { namespace ibc {
       }
       return true;
    }
-
-
-
-
-
-
-
 
 
    //--------------- ibc_plugin_impl ---------------
