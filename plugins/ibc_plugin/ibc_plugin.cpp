@@ -93,12 +93,12 @@ namespace eosio { namespace ibc {
       unique_ptr< dispatch_manager >   dispatcher;
 
       unique_ptr<boost::asio::steady_timer> connector_check;
-      unique_ptr<boost::asio::steady_timer> contract_timer;
+      unique_ptr<boost::asio::steady_timer> ibc_contract_check;
       unique_ptr<boost::asio::steady_timer> chain_check;
       unique_ptr<boost::asio::steady_timer> keepalive_timer;
       boost::asio::steady_timer::duration   connector_period;
-      boost::asio::steady_timer::duration   txn_exp_period;
-      boost::asio::steady_timer::duration   resp_expected_period;
+      boost::asio::steady_timer::duration   ibc_contract_interval{std::chrono::seconds{5}};
+      boost::asio::steady_timer::duration   chain_interval{std::chrono::seconds{5}};
       boost::asio::steady_timer::duration   keepalive_interval{std::chrono::seconds{5}};
       int                           max_cleanup_time_ms = 0;
 
@@ -152,6 +152,8 @@ namespace eosio { namespace ibc {
       void handle_message( connection_ptr c, const time_message &msg);
 
       void start_conn_timer( boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection );
+      void start_ibc_contract_timer( );
+      void start_chain_timer( );
       void start_monitors( );
 
       void connection_monitor(std::weak_ptr<connection> from_connection);
@@ -995,6 +997,28 @@ namespace eosio { namespace ibc {
       });
    }
 
+   void ibc_plugin_impl::start_ibc_contract_timer() {
+      ibc_contract_check->expires_from_now (ibc_contract_interval);
+      ibc_contract_check->async_wait ([this](boost::system::error_code ec) {
+         start_ibc_contract_timer();
+         if (ec) {
+            wlog ("start_ibc_contract_timer error: ${m}", ("m", ec.message()));
+         }
+         ilog("=====  start_ibc_contract_timer  =====");
+      });
+   }
+
+   void ibc_plugin_impl::start_chain_timer() {
+      chain_check->expires_from_now (chain_interval);
+      chain_check->async_wait ([this](boost::system::error_code ec) {
+         start_chain_timer();
+         if (ec) {
+            wlog ("start_chain_timer error: ${m}", ("m", ec.message()));
+         }
+         ilog("=====  start_chain_timer  =====");
+      });
+   }
+
    void ibc_plugin_impl::ticker() {
       keepalive_timer->expires_from_now (keepalive_interval);
       keepalive_timer->async_wait ([this](boost::system::error_code ec) {
@@ -1012,7 +1036,12 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::start_monitors() {
       connector_check.reset(new boost::asio::steady_timer( app().get_io_service()));
+      ibc_contract_check.reset(new boost::asio::steady_timer( app().get_io_service()));
+      chain_check.reset(new boost::asio::steady_timer( app().get_io_service()));
+
       start_conn_timer(connector_period, std::weak_ptr<connection>());
+      start_ibc_contract_timer();
+      start_chain_timer();
    }
 
    void ibc_plugin_impl::connection_monitor(std::weak_ptr<connection> from_connection) {
@@ -1177,8 +1206,6 @@ namespace eosio { namespace ibc {
 
          my->connector_period = std::chrono::seconds( options.at( "ibc-connection-cleanup-period" ).as<int>());
          my->max_cleanup_time_ms = options.at("ibc-max-cleanup-time-msec").as<int>();
-         my->txn_exp_period = def_txn_expire_wait;
-         my->resp_expected_period = def_resp_expected_wait;
          my->max_client_count = options.at( "ibc-max-clients" ).as<int>();
          my->max_nodes_per_host = options.at( "ibc-max-nodes-per-host" ).as<int>();
          my->num_clients = 0;
