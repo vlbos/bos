@@ -56,6 +56,7 @@ namespace eosio { namespace ibc {
 
    class sync_manager;
    class dispatch_manager;
+   class ibc_contract;
 
    using connection_ptr = std::shared_ptr<connection>;
    using connection_wptr = std::weak_ptr<connection>;
@@ -91,6 +92,7 @@ namespace eosio { namespace ibc {
       bool                             done = false;
       unique_ptr< sync_manager >       sync_master;
       unique_ptr< dispatch_manager >   dispatcher;
+      unique_ptr< ibc_contract >       contract;
 
       unique_ptr<boost::asio::steady_timer> connector_check;
       unique_ptr<boost::asio::steady_timer> ibc_contract_check;
@@ -151,10 +153,14 @@ namespace eosio { namespace ibc {
        */
       void handle_message( connection_ptr c, const time_message &msg);
 
+      void handle_message( connection_ptr c, const lwcls_meta_message &msg);
+      void handle_message( connection_ptr c, const request_lwcls_message &msg);
+      void handle_message( connection_ptr c, const lwcls_detail_message &msg);
       void handle_message( connection_ptr c, const lwc_init_message &msg);
-      void handle_message( connection_ptr c, const lwc_section_message &msg);
-      void handle_message( connection_ptr c, const lwc_section_info_message &msg);
-      void handle_message( connection_ptr c, const lwc_section_ids_message &msg);
+      void handle_message( connection_ptr c, const lwc_section_data &msg);
+      void handle_message( connection_ptr c, const lwc_ibctrx_data &msg);
+      void handle_message( connection_ptr c, const notice_lwc_block_message &msg);
+      void handle_message( connection_ptr c, const lwc_request_message &msg);
 
 
       void start_conn_timer( boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection );
@@ -442,8 +448,112 @@ namespace eosio { namespace ibc {
       void new_lwc_section();
 
 
+   };
+
+
+#define default_ibc_contract_name name(eosio.ibc)
+#define default_ibc_contract_chaindb_table_name name(chaindb)
+#define default_ibc_contract_sections_table_name name(sections)
+#define default_ibc_contract_
+
+   class ibc_contract {
+      name name;
+
+
+      void chain_init();
+      void newsection();
+      void addheaders();
+
 
    };
+
+
+
+optional<fc::datastream<const char *>>
+    get_table_last_row( const name& code, const name& scope, const name& table, const uint64_t nth = 0 ) {
+      const auto& d = app().get_plugin<chain_plugin>().chain().db();
+      const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(code, scope, table));
+      if (t_id != nullptr) {
+         const auto &idx = d.get_index<chain::key_value_index, chain::by_scope_primary>();
+         decltype(t_id->id) next_tid(t_id->id._id + 1);
+         auto lower = idx.lower_bound(boost::make_tuple(t_id->id));
+         auto upper = idx.lower_bound(boost::make_tuple(next_tid));
+
+         int i = nth;
+         for (auto itr = --upper; itr != lower && i >= 0; --itr) {
+            if ( i == 0 ) {
+               const key_value_object& obj = *itr;
+               fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
+               return ds;
+            }
+            --i;
+         }
+      }
+
+      return fc::datastream<const char *>();
+   }
+
+
+
+
+
+
+   void test(){
+      auto ds = get_table_last_row(N(eos222333ibc),N(eos222333ibc),N(rmtlcltrxs));
+
+      std::vector<char> buff;
+      buff.reserve(110);
+      buff.resize(100);
+
+      if( ds.valid() ){
+         ds.read(buff.data(),90);
+      }
+
+
+
+
+      ilog("-----------------------${n}", ("n", to_hex(buff)));
+
+//      ilog("0000000000------------------");
+
+   }
+
+
+
+   void ibc_contract::chain_init(){
+      // get last recored
+//      auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
+
+//      get_table_rows_params p;
+//      p.json = true;
+//      p.code = ;
+//      p.scope = ;
+//      p.table = ;
+//      p.table_key = ;
+//      p. = ;
+//      p. = ;
+//      p. = ;
+//      p. = ;
+//
+//
+//      ;
+//      string      ;
+//      name        ;
+//      string      ;
+//      string      lower_bound;
+//      string      upper_bound;
+//      uint32_t    limit = 10;
+//      string      key_type;  // type of key specified by index_position
+//      string      index_position; // 1 - primary (first), 2 - secondary index (in order defined by multi_index), 3 - third index, etc
+//      string      encode_type{"dec"}; //dec, hex , default=dec
+//
+//      ro_api.get_table_rows()
+
+   }
+
+
+
+
 
    class dispatch_manager {
 
@@ -1003,23 +1113,35 @@ namespace eosio { namespace ibc {
 
    }
 
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwcls_meta_message &msg) {
+
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const request_lwcls_message &msg) {
+
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwcls_detail_message &msg) {
+
+   }
+
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_init_message &msg) {
 
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data &msg) {
 
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_message &msg) {
-
-
-   }
-
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_info_message &msg) {
-
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_ibctrx_data &msg) {
 
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_ids_message &msg) {
+   void ibc_plugin_impl::handle_message( connection_ptr c, const notice_lwc_block_message &msg) {
 
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_request_message &msg) {
 
    }
 
@@ -1044,6 +1166,9 @@ namespace eosio { namespace ibc {
             wlog ("start_ibc_contract_timer error: ${m}", ("m", ec.message()));
          }
          ilog("=====  start_ibc_contract_timer  =====");
+
+         test();
+
       });
    }
 
@@ -1238,13 +1363,15 @@ namespace eosio { namespace ibc {
          ( "ibc-agent-name", bpo::value<string>()->default_value("\"BOS IBC Agent\""), "The name supplied to identify this node amongst the peers.")
          ( "ibc-allowed-connection", bpo::value<vector<string>>()->multitoken()->default_value({"any"}, "any"), "Can be 'any' or 'producers' or 'specified' or 'none'. If 'specified', peer-key must be specified at least once. If only 'producers', peer-key is not required. 'producers' and 'specified' may be combined.")
          ( "ibc-peer-key", bpo::value<vector<string>>()->composing()->multitoken(), "Optional public key of peer allowed to connect.  May be used multiple times.")
-         ( "ibc-peer-private-key", boost::program_options::value<vector<string>>()->composing()->multitoken(), "Tuple of [PublicKey, WIF private key] (may specify multiple times)")
+         ( "ibc-peer-private-key", bpo::value<vector<string>>()->composing()->multitoken(), "Tuple of [PublicKey, WIF private key] (may specify multiple times)")
          ( "ibc-max-clients", bpo::value<int>()->default_value(def_max_clients), "Maximum number of clients from which connections are accepted, use 0 for no limit")
          ( "ibc-connection-cleanup-period", bpo::value<int>()->default_value(def_conn_retry_wait), "number of seconds to wait before cleaning up dead connections")
          ( "ibc-max-cleanup-time-msec", bpo::value<int>()->default_value(10), "max connection cleanup time per cleanup call in millisec")
          ( "ibc-version-match", bpo::value<bool>()->default_value(false), "True to require exact match of ibc plugin version.")
          ( "ibc-sync-fetch-span", bpo::value<uint32_t>()->default_value(def_sync_fetch_span), "number of blocks headers to retrieve in a chunk from any individual peer during synchronization")
          ( "ibc-use-socket-read-watermark", bpo::value<bool>()->default_value(false), "Enable expirimental socket read watermark optimization")
+         ( "ibc-side-chain-id", bpo::value<string>()->default_value(""), "side chain id")
+         ( "ibc-contract", bpo::value<string>()->default_value(""), "ibc contract name")
          ( "ibc-log-format", bpo::value<string>()->default_value( "[\"${_name}\" ${_ip}:${_port}]" ),
            "The string used to format peers when logging messages about them.  Variables are escaped with ${<variable name>}.\n"
            "Available Variables:\n"
