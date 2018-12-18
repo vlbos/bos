@@ -50,6 +50,7 @@ namespace eosio { namespace ibc {
    using fc::time_point;
    using fc::time_point_sec;
    using eosio::chain::transaction_id_type;
+   using eosio::chain::name;
    namespace bip = boost::interprocess;
 
    class connection;
@@ -80,9 +81,8 @@ namespace eosio { namespace ibc {
 
       enum possible_connections : char {
          None = 0,
-         Producers = 1 << 0,
-         Specified = 1 << 1,
-         Any = 1 << 2
+         Specified = 1 << 0,
+         Any = 1 << 1
       };
       possible_connections             allowed_connections{None};
 
@@ -108,7 +108,7 @@ namespace eosio { namespace ibc {
 
       bool                          network_version_match = false;
       fc::sha256                    chain_id;
-      fc::sha256                    remote_chain_id;
+      fc::sha256                    sidechain_id;
       fc::sha256                    node_id;
 
       string                        user_agent_name;
@@ -153,7 +153,7 @@ namespace eosio { namespace ibc {
        */
       void handle_message( connection_ptr c, const time_message &msg);
 
-      void handle_message( connection_ptr c, const lwcls_meta_message &msg);
+      void handle_message( connection_ptr c, const lwc_heartbeat_message &msg);
       void handle_message( connection_ptr c, const request_lwcls_message &msg);
       void handle_message( connection_ptr c, const lwcls_detail_message &msg);
       void handle_message( connection_ptr c, const lwc_init_message &msg);
@@ -250,28 +250,12 @@ namespace eosio { namespace ibc {
 
    constexpr auto     message_header_size = 4;
 
+
    /**
-    *  For a while, network version was a 16 bit value equal to the second set of 16 bits
-    *  of the current build's git commit id. We are now replacing that with an integer protocol
-    *  identifier. Based on historical analysis of all git commit identifiers, the larges gap
-    *  between ajacent commit id values is shown below.
-    *  these numbers were found with the following commands on the master branch:
-    *
-    *  git log | grep "^commit" | awk '{print substr($2,5,4)}' | sort -u > sorted.txt
-    *  rm -f gap.txt; prev=0; for a in $(cat sorted.txt); do echo $prev $((0x$a - 0x$prev)) $a >> gap.txt; prev=$a; done; sort -k2 -n gap.txt | tail
-    *
-    *  DO NOT EDIT ibc_version_base OR ibc_version_range!
-    */
-   constexpr uint16_t ibc_version_base = 0x04b5;
-   constexpr uint16_t ibc_version_range = 106;
-   /**
-    *  If there is a change to network protocol or behavior, increment ibc version to identify
+    *  If there is a change to network protocol or behavior, increment net version to identify
     *  the need for compatibility hooks
     */
-   constexpr uint16_t proto_base = 0;
-   constexpr uint16_t proto_explicit_sync = 1;
-
-   constexpr uint16_t ibc_version = proto_explicit_sync;
+   constexpr uint16_t net_version = 1;
 
 
    struct handshake_initializer {
@@ -450,27 +434,7 @@ namespace eosio { namespace ibc {
 
    };
 
-
-#define default_ibc_contract_name name(eosio.ibc)
-#define default_ibc_contract_chaindb_table_name name(chaindb)
-#define default_ibc_contract_sections_table_name name(sections)
-#define default_ibc_contract_
-
-   class ibc_contract {
-      name name;
-
-
-      void chain_init();
-      void newsection();
-      void addheaders();
-
-
-   };
-
-
-
-optional<fc::datastream<const char *>>
-    get_table_last_row( const name& code, const name& scope, const name& table, const uint64_t nth = 0 ) {
+   optional<key_value_object>  get_table_reverse_nth_row_obj( const name& code, const name& scope, const name& table, const uint64_t nth = 0 ) {
       const auto& d = app().get_plugin<chain_plugin>().chain().db();
       const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(code, scope, table));
       if (t_id != nullptr) {
@@ -479,48 +443,160 @@ optional<fc::datastream<const char *>>
          auto lower = idx.lower_bound(boost::make_tuple(t_id->id));
          auto upper = idx.lower_bound(boost::make_tuple(next_tid));
 
+         if ( lower == upper ){
+            return optional<key_value_object>();
+         }
+
+         --upper;
+
          int i = nth;
-         for (auto itr = --upper; itr != lower && i >= 0; --itr) {
-            if ( i == 0 ) {
-               const key_value_object& obj = *itr;
-               fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
-               return ds;
+         auto itr = upper;
+         for (; itr != lower && i >= 0; --itr) {
+            if (i == 0) {
+               const key_value_object &obj = *itr;
+               return obj;
             }
             --i;
          }
-      }
 
-      return fc::datastream<const char *>();
+         if ( i == 0 && itr == lower ){
+            return *lower;
+         }
+      }
+      return optional<key_value_object>();
    }
 
 
 
+
+
+   class ibc_contract {
+   public:
+      ibc_contract(  name contract );
+      optional<section_type> get_table_sections_reverse_nth( uint64_t nth = 0 );
+
+      void chain_init();
+      void newsection();
+      void addheaders();
+
+      bool has_contract();
+      bool initialized();
+
+   private:
+      name account;
+   };
+
+   //--------------- ibc_contract ---------------
+
+   ibc_contract::ibc_contract( name contract ){
+      account = contract;
+   }
+
+   bool ibc_contract::has_contract(){
+      auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
+      eosio::chain_apis::read_only::get_code_hash_params params{account};
+      try {
+         auto result = ro_api.get_code_hash( params );
+         if ( result.code_hash != fc::sha256() ){
+            return true;
+         }
+      } catch (...){}
+      return false;
+   }
+
+   bool ibc_contract::initialized(){
+      auto ret = get_table_sections_reverse_nth();
+      if ( ret.valid() ){
+         return true;
+      }
+      return false;
+   }
+
+   optional<section_type> ibc_contract::get_table_sections_reverse_nth( uint64_t nth ){
+      auto p = get_table_reverse_nth_row_obj( account, account, N(sections), nth );
+      if ( p.valid() ){
+         auto obj = *p;
+         fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
+         section_type result;
+         fc::raw::unpack( ds, result );
+         return result;
+      }
+      return optional<section_type>();
+   }
 
 
 
    void test(){
-      auto ds = get_table_last_row(N(eos222333ibc),N(eos222333ibc),N(rmtlcltrxs));
+      if ( my_impl->contract->has_contract() ){
+         ilog("--------- ibc contract has contract ---------");
+      } else {
+         ilog("--------- ibc contract has not contract ---------");
+      }
 
-      std::vector<char> buff;
-      buff.reserve(110);
-      buff.resize(100);
-
-      if( ds.valid() ){
-         ds.read(buff.data(),90);
+      if ( my_impl->contract->initialized() ){
+         ilog("--------- ibc contract has initialized ---------");
+      } else {
+         ilog("--------- ibc contract has not initialized ---------");
       }
 
 
+   }
+//      get_table_sections_reverse_nth(0);
+//      get_table_sections_reverse_nth(1);
+//      get_table_sections_reverse_nth(2);
+//
+//      auto p0 = get_table_last_row(N(eos222333ibc),N(eos222333ibc) ,N(rmtlcltrxs), 0);
+//      auto p1 = get_table_last_row(N(eos222333ibc),N(eos222333ibc) ,N(rmtlcltrxs), 1);
+//      auto p2 = get_table_last_row(N(eos222333ibc),N(eos222333ibc) ,N(rmtlcltrxs), 2);
+//
+//      if ( p0.valid()){
+//         auto obj = *p0;
+//         auto s = to_hex(obj.value.data(), obj.value.size());
+//         ilog("--------0---size--${n}", ("n", obj.value.size()));
+//         ilog("--------0---------${n}", ("n", s));
+//      }
+//
+//
+//      if ( p1.valid()){
+//         auto obj = *p1;
+//         auto s = to_hex(obj.value.data(), obj.value.size());
+//         ilog("--------1---size--${n}", ("n", obj.value.size()));
+//         ilog("--------1---------${n}", ("n", s));
+//      }
+//
+//      if ( p2.valid()){
+//         auto obj = *p2;
+//         auto s = to_hex(obj.value.data(), obj.value.size());
+//         ilog("--------2---size--${n}", ("n", obj.value.size()));
+//         ilog("--------2---------${n}", ("n", s));
+//      }
 
 
-      ilog("-----------------------${n}", ("n", to_hex(buff)));
+//      fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
+//      read_only::get_currency_stats_result result;
+//
+//      fc::raw::unpack(ds, result.supply);
+//      fc::raw::unpack(ds, result.max_supply);
+//      fc::raw::unpack(ds, result.issuer);
+
+//      std::vector<char> buff;
+//      buff.reserve(110);
+//      buff.resize(100);
+//
+//      if( ds.valid() ){
+//         ds.read(buff.data(),90);
+//      }
+
+
+//      ilog("-----------------------${n}", ("n", to_hex(buff)));
 
 //      ilog("0000000000------------------");
 
-   }
+//   }
 
 
 
-   void ibc_contract::chain_init(){
+//   void ibc_contract::chain_init(){
       // get last recored
 //      auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
 
@@ -549,7 +625,7 @@ optional<fc::datastream<const char *>>
 //
 //      ro_api.get_table_rows()
 
-   }
+//   }
 
 
 
@@ -1096,11 +1172,113 @@ optional<fc::datastream<const char *>>
    }
 
    bool ibc_plugin_impl::is_valid( const handshake_message &msg) {
-
+      // Do some basic validation of an incoming handshake_message, so things
+      // that really aren't handshake messages can be quickly discarded without
+      // affecting state.
+      bool valid = true;
+      if (msg.last_irreversible_block_num > msg.head_num) {
+         wlog("Handshake message validation: last irreversible block (${i}) is greater than head block (${h})",
+              ("i", msg.last_irreversible_block_num)("h", msg.head_num));
+         valid = false;
+      }
+      if (msg.p2p_address.empty()) {
+         wlog("Handshake message validation: p2p_address is null string");
+         valid = false;
+      }
+      if (msg.os.empty()) {
+         wlog("Handshake message validation: os field is null string");
+         valid = false;
+      }
+      if ((msg.sig != chain::signature_type() || msg.token != sha256()) && (msg.token != fc::sha256::hash(msg.time))) {
+         wlog("Handshake message validation: token field invalid");
+         valid = false;
+      }
+      if ( msg.chain_id != sidechain_id ) {
+         wlog("Handshake message validation: sidechain id mismatch");
+         valid = false;
+      }
+      return valid;
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const handshake_message &msg) {
-      ilog("handle_message == handshake_message ");
+      peer_ilog(c, "received handshake_message");
+      if (!is_valid(msg)) {
+         peer_elog( c, "bad handshake message");
+         c->enqueue( go_away_message( fatal_other ));
+         return;
+      }
+
+      if( c->connecting ) {
+         c->connecting = false;
+      }
+      if (msg.generation == 1) {
+         if( msg.node_id == node_id) {
+            elog( "Self connection detected. Closing connection");
+            c->enqueue( go_away_message( self ) );
+            return;
+         }
+
+         if( c->peer_addr.empty() || c->last_handshake_recv.node_id == fc::sha256()) {
+            fc_dlog(logger, "checking for duplicate" );
+            for(const auto &check : connections) {
+               if(check == c)
+                  continue;
+               if(check->connected() && check->peer_name() == msg.p2p_address) {
+                  // It's possible that both peers could arrive here at relatively the same time, so
+                  // we need to avoid the case where they would both tell a different connection to go away.
+                  // Using the sum of the initial handshake times of the two connections, we will
+                  // arbitrarily (but consistently between the two peers) keep one of them.
+                  if (msg.time + c->last_handshake_sent.time <= check->last_handshake_sent.time + check->last_handshake_recv.time)
+                     continue;
+
+                  fc_dlog( logger, "sending go_away duplicate to ${ep}", ("ep",msg.p2p_address) );
+                  go_away_message gam(duplicate);
+                  gam.node_id = node_id;
+                  c->enqueue(gam);
+                  c->no_retry = duplicate;
+                  return;
+               }
+            }
+         }
+         else {
+            fc_dlog(logger, "skipping duplicate check, addr == ${pa}, id = ${ni}",("pa",c->peer_addr)("ni",c->last_handshake_recv.node_id));
+         }
+
+         if( msg.chain_id != sidechain_id) {
+            elog( "Peer chain id not correct. Closing connection");
+            c->enqueue( go_away_message(go_away_reason::wrong_chain) );
+            return;
+         }
+         c->protocol_version = to_protocol_version(msg.network_version);
+         if(c->protocol_version != net_version) {
+            if (network_version_match) {
+               elog("Peer network version does not match expected ${nv} but got ${mnv}",
+                    ("nv", net_version)("mnv", c->protocol_version));
+               c->enqueue(go_away_message(wrong_version));
+               return;
+            } else {
+               ilog("Local network version: ${nv} Remote version: ${mnv}",
+                    ("nv", net_version)("mnv", c->protocol_version));
+            }
+         }
+
+         if(  c->node_id != msg.node_id) {
+            c->node_id = msg.node_id;
+         }
+
+         if(!authenticate_peer(msg)) {
+            elog("Peer not authenticated.  Closing connection.");
+            c->enqueue(go_away_message(authentication));
+            return;
+         }
+
+         if (c->sent_handshake_count == 0) {
+            c->send_handshake();
+         }
+      }
+
+      c->last_handshake_recv = msg;
+      c->_logger_variant.reset();
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const go_away_message &msg ) {
@@ -1113,7 +1291,7 @@ optional<fc::datastream<const char *>>
 
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwcls_meta_message &msg) {
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_heartbeat_message &msg) {
 
    }
 
@@ -1168,6 +1346,23 @@ optional<fc::datastream<const char *>>
          ilog("=====  start_ibc_contract_timer  =====");
 
          test();
+
+
+         if ( my_impl->contract->has_contract() ){
+            ilog("--------- ibc contract has contract ---------");
+         } else {
+            ilog("--------- ibc contract has not contract ---------");
+         }
+
+         if ( my_impl->contract->initialized() ){
+            ilog("--------- ibc contract has initialized ---------");
+         } else {
+            ilog("--------- ibc contract has not initialized ---------");
+         }
+/**
+ * 检查是否有需要转发的交易
+ * 检查最后一个section 是否valid
+ */
 
       });
    }
@@ -1308,15 +1503,72 @@ optional<fc::datastream<const char *>>
    }
 
    bool ibc_plugin_impl::authenticate_peer(const handshake_message& msg) const {
+      if(allowed_connections == None)
+         return false;
 
+      if(allowed_connections == Any)
+         return true;
+
+      if(allowed_connections == Specified) {
+         auto allowed_it = std::find(allowed_peers.begin(), allowed_peers.end(), msg.key);
+         auto private_it = private_keys.find(msg.key);
+
+         if( allowed_it == allowed_peers.end() && private_it == private_keys.end() ) {
+            elog( "Peer ${peer} sent a handshake with an unauthorized key: ${key}.",
+                  ("peer", msg.p2p_address)("key", msg.key));
+            return false;
+         }
+      }
+
+      namespace sc = std::chrono;
+      sc::system_clock::duration msg_time(msg.time);
+      auto time = sc::system_clock::now().time_since_epoch();
+      if(time - msg_time > peer_authentication_interval) {
+         elog( "Peer ${peer} sent a handshake with a timestamp skewed by more than ${time}.",
+               ("peer", msg.p2p_address)("time", "1 second")); // TODO Add to_variant for std::chrono::system_clock::duration
+         return false;
+      }
+
+      if(msg.sig != chain::signature_type() && msg.token != sha256()) {
+         sha256 hash = fc::sha256::hash(msg.time);
+         if(hash != msg.token) {
+            elog( "Peer ${peer} sent a handshake with an invalid token.",
+                  ("peer", msg.p2p_address));
+            return false;
+         }
+         chain::public_key_type peer_key;
+         try {
+            peer_key = crypto::public_key(msg.sig, msg.token, true);
+         }
+         catch (fc::exception& /*e*/) {
+            elog( "Peer ${peer} sent a handshake with an unrecoverable key.",
+                  ("peer", msg.p2p_address));
+            return false;
+         }
+         if((allowed_connections & Specified) && peer_key != msg.key) {
+            elog( "Peer ${peer} sent a handshake with an unauthenticated key.",
+                  ("peer", msg.p2p_address));
+            return false;
+         }
+      }
+      else if(allowed_connections & Specified) {
+         dlog( "Peer sent a handshake with blank signature and token, but this node accepts only authenticated connections.");
+         return false;
+      }
+      return true;
    }
 
    chain::public_key_type ibc_plugin_impl::get_authentication_key() const {
-
+      if(!private_keys.empty())
+         return private_keys.begin()->first;
+      return chain::public_key_type();
    }
 
    chain::signature_type ibc_plugin_impl::sign_compact(const chain::public_key_type& signer, const fc::sha256& digest) const {
-
+      auto private_key_itr = private_keys.find(signer);
+      if(private_key_itr != private_keys.end())
+         return private_key_itr->second.sign(digest);
+      return chain::signature_type();
    }
 
    connection_ptr ibc_plugin_impl::find_connection( string host )const {
@@ -1326,19 +1578,56 @@ optional<fc::datastream<const char *>>
    }
 
    uint16_t ibc_plugin_impl::to_protocol_version (uint16_t v) {
-      if (v >= ibc_version_base) {
-         v -= ibc_version_base;
-         return (v > ibc_version_range) ? 0 : v;
-      }
-      return 0;
+         return v;
    }
-
-
-
+   
    //--------------- handshake_initializer ---------------
 
    void handshake_initializer::populate( handshake_message &hello) {
+      hello.network_version = net_version;
+      hello.chain_id = my_impl->chain_id;
+      hello.node_id = my_impl->node_id;
+      hello.key = my_impl->get_authentication_key();
+      hello.time = std::chrono::system_clock::now().time_since_epoch().count();
+      hello.token = fc::sha256::hash(hello.time);
+      hello.sig = my_impl->sign_compact(hello.key, hello.token);
+      // If we couldn't sign, don't send a token.
+      if(hello.sig == chain::signature_type())
+         hello.token = sha256();
+      hello.p2p_address = my_impl->p2p_address + " - " + hello.node_id.str().substr(0,7);
+#if defined( __APPLE__ )
+      hello.os = "osx";
+#elif defined( __linux__ )
+      hello.os = "linux";
+#elif defined( _MSC_VER )
+      hello.os = "win32";
+#else
+      hello.os = "other";
+#endif
+      hello.agent = my_impl->user_agent_name;
 
+      controller& cc = my_impl->chain_plug->chain();
+      hello.head_id = fc::sha256();
+      hello.last_irreversible_block_id = fc::sha256();
+      hello.head_num = cc.fork_db_head_block_num();
+      hello.last_irreversible_block_num = cc.last_irreversible_block_num();
+      if( hello.last_irreversible_block_num ) {
+         try {
+            hello.last_irreversible_block_id = cc.get_block_id_for_num(hello.last_irreversible_block_num);
+         }
+         catch( const unknown_block_exception &ex) {
+            ilog("caught unkown_block");
+            hello.last_irreversible_block_num = 0;
+         }
+      }
+      if( hello.head_num ) {
+         try {
+            hello.head_id = cc.get_block_id_for_num( hello.head_num );
+         }
+         catch( const unknown_block_exception &ex) {
+            hello.head_num = 0;
+         }
+      }
    }
 
 
@@ -1361,17 +1650,15 @@ optional<fc::datastream<const char *>>
          ( "ibc-peer-address", bpo::value< vector<string> >()->composing(), "The public endpoint of a peer node to connect to. Use multiple ibc-peer-address options as needed to compose a network.")
          ( "ibc-max-nodes-per-host", bpo::value<int>()->default_value(def_max_nodes_per_host), "Maximum number of client nodes from any single IP address")
          ( "ibc-agent-name", bpo::value<string>()->default_value("\"BOS IBC Agent\""), "The name supplied to identify this node amongst the peers.")
-         ( "ibc-allowed-connection", bpo::value<vector<string>>()->multitoken()->default_value({"any"}, "any"), "Can be 'any' or 'producers' or 'specified' or 'none'. If 'specified', peer-key must be specified at least once. If only 'producers', peer-key is not required. 'producers' and 'specified' may be combined.")
+         ( "ibc-allowed-connection", bpo::value<vector<string>>()->multitoken()->default_value({"any"}, "any"), "Can be 'any' or 'specified' or 'none'. If 'specified', peer-key must be specified at least once.")
          ( "ibc-peer-key", bpo::value<vector<string>>()->composing()->multitoken(), "Optional public key of peer allowed to connect.  May be used multiple times.")
          ( "ibc-peer-private-key", bpo::value<vector<string>>()->composing()->multitoken(), "Tuple of [PublicKey, WIF private key] (may specify multiple times)")
          ( "ibc-max-clients", bpo::value<int>()->default_value(def_max_clients), "Maximum number of clients from which connections are accepted, use 0 for no limit")
          ( "ibc-connection-cleanup-period", bpo::value<int>()->default_value(def_conn_retry_wait), "number of seconds to wait before cleaning up dead connections")
          ( "ibc-max-cleanup-time-msec", bpo::value<int>()->default_value(10), "max connection cleanup time per cleanup call in millisec")
          ( "ibc-version-match", bpo::value<bool>()->default_value(false), "True to require exact match of ibc plugin version.")
-         ( "ibc-sync-fetch-span", bpo::value<uint32_t>()->default_value(def_sync_fetch_span), "number of blocks headers to retrieve in a chunk from any individual peer during synchronization")
-         ( "ibc-use-socket-read-watermark", bpo::value<bool>()->default_value(false), "Enable expirimental socket read watermark optimization")
-         ( "ibc-side-chain-id", bpo::value<string>()->default_value(""), "side chain id")
-         ( "ibc-contract", bpo::value<string>()->default_value(""), "ibc contract name")
+         ( "ibc-sidechain-id", bpo::value<string>(), "the sidechain's chain id")
+         ( "ibc-contract", bpo::value<string>(), "the name of this chain's ibc contract")
          ( "ibc-log-format", bpo::value<string>()->default_value( "[\"${_name}\" ${_ip}:${_port}]" ),
            "The string used to format peers when logging messages about them.  Variables are escaped with ${<variable name>}.\n"
            "Available Variables:\n"
@@ -1397,8 +1684,18 @@ optional<fc::datastream<const char *>>
 
          my->network_version_match = options.at( "ibc-version-match" ).as<bool>();
 
-//         my->sync_master.reset( new sync_manager( options.at( "ibc-sync-fetch-span" ).as<uint32_t>()));
+         my->sync_master.reset( new sync_manager );
          my->dispatcher.reset( new dispatch_manager );
+
+         EOS_ASSERT( options.count( "ibc-sidechain-id" ) && options.at("ibc-sidechain-id").as<string>() != string(),
+            chain::plugin_config_exception, "ibc-sidechain-id not specified" );
+         my->sidechain_id = fc::sha256( options.at( "ibc-sidechain-id" ).as<string>() );
+         ilog( "ibc sidechain id is ${id}", ("id",  my->sidechain_id.str()));
+
+         EOS_ASSERT( options.count( "ibc-contract" ) && options.at("ibc-contract").as<string>() != string(),
+            chain::plugin_config_exception, "ibc-contract not specified" );
+         my->contract.reset( new ibc_contract( eosio::chain::name{ options.at("ibc-contract").as<string>()}));
+         ilog( "ibc contract account is ${name}", ("name",  options.at("ibc-contract").as<string>()));
 
          my->connector_period = std::chrono::seconds( options.at( "ibc-connection-cleanup-period" ).as<int>());
          my->max_cleanup_time_ms = options.at("ibc-max-cleanup-time-msec").as<int>();
@@ -1407,15 +1704,13 @@ optional<fc::datastream<const char *>>
          my->num_clients = 0;
          my->started_sessions = 0;
 
-         my->use_socket_read_watermark = options.at( "ibc-use-socket-read-watermark" ).as<bool>();
-
          my->resolver = std::make_shared<tcp::resolver>( std::ref( app().get_io_service()));
 
          if( options.count( "ibc-listen-endpoint" )) {
             my->p2p_address = options.at( "ibc-listen-endpoint" ).as<string>();
             auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
             auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
-            idump((host)( port ));
+            ilog("ibc listen endpoint is ${h}:${p}",("h", host )("p", port));
             tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
 
             my->listen_endpoint = *my->resolver->resolve( query );
@@ -1449,8 +1744,6 @@ optional<fc::datastream<const char *>>
             for( const std::string& allowed_remote : allowed_remotes ) {
                if( allowed_remote == "any" )
                   my->allowed_connections |= ibc_plugin_impl::Any;
-               else if( allowed_remote == "producers" )
-                  my->allowed_connections |= ibc_plugin_impl::Producers;
                else if( allowed_remote == "specified" )
                   my->allowed_connections |= ibc_plugin_impl::Specified;
                else if( allowed_remote == "none" )
@@ -1482,7 +1775,7 @@ optional<fc::datastream<const char *>>
          EOS_ASSERT( my->chain_plug, chain::missing_chain_plugin_exception, "" );
          my->chain_id = app().get_plugin<chain_plugin>().get_chain_id();
 
-//         my->node_id = ;
+         fc::rand_pseudo_bytes( my->node_id.data(), my->node_id.data_size());
 
          my->keepalive_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
          my->ticker();
