@@ -94,11 +94,23 @@ namespace eosio {
          stoped ///< ibc contract stoped for some reason
       };
 
+      constexpr auto ibc_contract_state_str( ibc_contract_state s ) {
+         switch (s ) {
+            case none : return "none";
+            case deployed : return "deployed";
+            case working : return "working";
+            case stoped : return "stoped";
+            default : return "unknown";
+         }
+      }
+
       /**
        * this hearbeat message should broadcast with time_message
        * and when the lwcls has any update broadcast this too.
        */
       struct lwc_heartbeat_message {
+         lwc_heartbeat_message(): state(none),ls_first_num(0),ls_last_num(0),ls_lib_num(0),
+                                  ls_first_id(),ls_last_id(),ls_lib_id(),ls_valid(false){}
          ibc_contract_state state;
          uint32_t       ls_first_num;
          uint32_t       ls_last_num;
@@ -115,10 +127,12 @@ namespace eosio {
        * peer chain should feed back "lwcls_detail_message"
        */
       struct request_lwcls_message {
+         request_lwcls_message():num(0){}
          uint32_t num;  //!< get the last num block ids in the last section of the lwc, 0 means all ids of last section
       };
 
       struct lwcls_detail_message {
+         lwcls_detail_message():first_num(0),last_num(0),lib_num(0),first_id(),last_id(),lib_id(),valid(false),ids(){}
          uint32_t       first_num;
          uint32_t       last_num;
          uint32_t       lib_num;
@@ -133,17 +147,20 @@ namespace eosio {
        * send when last section's first blcok number is 0
        */
       struct lwc_init_message {
+         lwc_init_message():header(),active_schedule(),blockroot_merkle(){}
          signed_block_header     header;
          producer_schedule_type  active_schedule;
          incremental_merkle      blockroot_merkle;
       };
 
       struct lwc_section_data {
+         lwc_section_data():headers(),blockroot_merkle(){}
          std::vector<signed_block_header>    headers;
          incremental_merkle                  blockroot_merkle;
       };
 
       struct lwc_ibctrx_data {
+         lwc_ibctrx_data():block_id(),trx(),merkle_path(){}
          block_id_type              block_id;
          transaction_receipt        trx;
          std::vector<digest_type>   merkle_path;
@@ -157,11 +174,13 @@ namespace eosio {
        * when recieve this message the peer chain's ibc plugin will send "lwc_request_message"
        */
       struct notice_lwc_block_message {
+         notice_lwc_block_message():num(0),id(){}
          uint32_t       num;
          block_id_type  id;
       };
 
       struct lwc_request_message {
+         lwc_request_message():start_block_num(0),end_block_num(0){}
          uint32_t start_block_num;
          uint32_t end_block_num;
       };
@@ -191,7 +210,7 @@ FC_REFLECT( eosio::ibc::handshake_message,
 FC_REFLECT( eosio::ibc::go_away_message, (reason)(node_id) )
 FC_REFLECT( eosio::ibc::time_message, (org)(rec)(xmt)(dst) )
 
-FC_REFLECT( eosio::ibc::lwc_heartbeat_message, (ls_first_num)(ls_last_num)(ls_lib_num)(ls_first_id)(ls_last_id)(ls_lib_id)(ls_valid) )
+FC_REFLECT( eosio::ibc::lwc_heartbeat_message, (state)(ls_first_num)(ls_last_num)(ls_lib_num)(ls_first_id)(ls_last_id)(ls_lib_id)(ls_valid) )
 FC_REFLECT( eosio::ibc::request_lwcls_message, (num) )
 FC_REFLECT( eosio::ibc::lwcls_detail_message, (first_num)(last_num)(lib_num)(first_id)(last_id)(lib_id)(valid)(ids) )
 FC_REFLECT( eosio::ibc::lwc_init_message, (header)(active_schedule)(blockroot_merkle)  )

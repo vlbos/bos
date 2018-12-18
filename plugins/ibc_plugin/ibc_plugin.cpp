@@ -561,7 +561,7 @@ namespace eosio { namespace ibc {
    }
 
    bool ibc_contract::lib_depth_valid(){
-      if ( lwc_lib_depth >= min_lwc_lib_depth || lwc_lib_depth <= max_lwc_lib_depth ){
+      if ( lwc_lib_depth >= min_lwc_lib_depth && lwc_lib_depth <= max_lwc_lib_depth ){
          return true;
       }
       return false;
@@ -1229,11 +1229,11 @@ namespace eosio { namespace ibc {
             fc_dlog(logger, "skipping duplicate check, addr == ${pa}, id = ${ni}",("pa",c->peer_addr)("ni",c->last_handshake_recv.node_id));
          }
 
-         if( msg.chain_id != sidechain_id) {
-            elog( "Peer chain id not correct. Closing connection");
-            c->enqueue( go_away_message(go_away_reason::wrong_chain) );
-            return;
-         }
+//         if( msg.chain_id != sidechain_id) {
+//            elog( "Peer chain id not correct. Closing connection");
+//            c->enqueue( go_away_message(go_away_reason::wrong_chain) );
+//            return;
+//         }
          c->protocol_version = to_protocol_version(msg.network_version);
          if(c->protocol_version != net_version) {
             if (network_version_match) {
@@ -1313,35 +1313,37 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_heartbeat_message &msg) {
-
+      peer_ilog(c, "received lwc_heartbeat_message");
+      ilog(ibc_contract_state_str(msg.state));
+//      idump((msg));
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const request_lwcls_message &msg) {
-
+      peer_ilog(c, "received request_lwcls_message");
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwcls_detail_message &msg) {
-
+      peer_ilog(c, "received lwcls_detail_message");
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_init_message &msg) {
-
+      peer_ilog(c, "received lwc_init_message");
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data &msg) {
-
+      peer_ilog(c, "received lwc_section_data");
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_ibctrx_data &msg) {
-
+      peer_ilog(c, "received lwc_ibctrx_data");
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const notice_lwc_block_message &msg) {
-
+      peer_ilog(c, "received notice_lwc_block_message");
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_request_message &msg) {
-
+      peer_ilog(c, "received lwc_request_message");
    }
 
    void ibc_plugin_impl::start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection) {
@@ -1381,9 +1383,12 @@ namespace eosio { namespace ibc {
          return;
       }
 
+      ilog("++++++++++++========");
+
       lwc_heartbeat_message msg;
       msg.state = contract_state;
-      if ( contract_state == working || contract_state == stoped ){
+
+      if ( contract_state != deployed ){
          auto p = my_impl->contract->get_table_sections_reverse_nth();
          if ( p.valid() ){
             auto obj = *p;
