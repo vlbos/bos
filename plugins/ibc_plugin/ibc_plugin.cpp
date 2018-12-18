@@ -1314,8 +1314,38 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_heartbeat_message &msg) {
       peer_ilog(c, "received lwc_heartbeat_message");
-      ilog(ibc_contract_state_str(msg.state));
-//      idump((msg));
+
+      if ( msg.state == deployed ) {
+         // 发送初始化
+         controller &cc = chain_plug->chain();
+         uint32_t head_num = cc.fork_db_head_block_num();
+         uint32_t depth = 200;
+         block_state_ptr p = cc.fetch_block_state_by_number( head_num - depth );
+
+         while ( p == block_state_ptr() && depth >= 10 ){
+            depth /= 2;
+            block_state_ptr p = cc.fetch_block_state_by_number( head_num - depth );
+            ilog("didn't get block state of ${n}", ("n", head_num - depth ));
+         }
+
+         if ( p == block_state_ptr() ){
+            ilog("didn't get any block state finally");
+            return;
+         }
+
+         if ( p->pending_schedule.version != p->active_schedule.version ){
+            ilog("pending_schedule version not equal to active_schedule version, wait until equal");
+            return;
+         }
+
+         lwc_init_message msg;
+         msg.header = p->header;
+         msg.active_schedule = p->active_schedule;
+         msg.blockroot_merkle = p->blockroot_merkle;
+
+         ilog("send lwc_init_message");
+         c->enqueue( msg, true);
+      }
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const request_lwcls_message &msg) {
