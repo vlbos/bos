@@ -93,6 +93,7 @@ namespace eosio { namespace ibc {
       unique_ptr< sync_manager >       sync_master;
       unique_ptr< dispatch_manager >   dispatcher;
       unique_ptr< ibc_contract >       contract;
+      ibc_contract_state               contract_state = none;
 
       unique_ptr<boost::asio::steady_timer> connector_check;
       unique_ptr<boost::asio::steady_timer> ibc_contract_check;
@@ -134,8 +135,6 @@ namespace eosio { namespace ibc {
       void accepted_block_header(const block_state_ptr&);
       void accepted_block(const block_state_ptr&);
       void irreversible_block(const block_state_ptr&);
-      void accepted_transaction(const transaction_metadata_ptr&);
-      void applied_transaction(const transaction_trace_ptr&);
       void accepted_confirmation(const header_confirmation&);
 
       bool is_valid( const handshake_message &msg);
@@ -466,22 +465,52 @@ namespace eosio { namespace ibc {
       return optional<key_value_object>();
    }
 
+   optional<key_value_object>  get_singleton( const name& code, const name& scope, const name& table ) {
+      const auto &d = app().get_plugin<chain_plugin>().chain().db();
+      const auto *t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(
+         boost::make_tuple(code, scope, table));
+      if (t_id != nullptr) {
+         const auto &idx = d.get_index<chain::key_value_index, chain::by_scope_primary>();
+         decltype(t_id->id) next_tid(t_id->id._id + 1);
+         auto lower = idx.lower_bound(boost::make_tuple(t_id->id));
+         auto upper = idx.lower_bound(boost::make_tuple(next_tid));
 
+         if (lower == upper) {
+            return optional<key_value_object>();
+         }
+         return *lower;
+      }
+      return optional<key_value_object>();
+   }
 
-
-
+#define min_lwc_lib_depth 50
+#define max_lwc_lib_depth 200
+   
+   
    class ibc_contract {
    public:
       ibc_contract(  name contract );
-      optional<section_type> get_table_sections_reverse_nth( uint64_t nth = 0 );
 
+      // actions
       void chain_init();
       void newsection();
       void addheaders();
 
+      // tables
+      optional<section_type> get_table_sections_reverse_nth( uint64_t nth = 0 );
+      optional<global_state> get_global_singleton();
+
+      // others
+      void get_basic_info();
+      bool lib_depth_valid();
+
+      
+      uint32_t lwc_lib_depth = 0;
+      
+   private:
       bool has_contract();
       bool initialized();
-
+      
    private:
       name account;
    };
@@ -512,6 +541,32 @@ namespace eosio { namespace ibc {
       return false;
    }
 
+   
+   void ibc_contract::get_basic_info(){
+      ibc_contract_state state = none;
+      if ( has_contract() ){
+         state = deployed;
+         if ( initialized() ){
+            state = working;
+         }
+      }
+      my_impl->contract_state = state;
+
+      global_state gstate;
+      auto sp = get_global_singleton();
+      if ( sp.valid() ) {
+         gstate = *sp;
+         lwc_lib_depth = gstate.lib_depth;
+      }
+   }
+
+   bool ibc_contract::lib_depth_valid(){
+      if ( lwc_lib_depth >= min_lwc_lib_depth || lwc_lib_depth <= max_lwc_lib_depth ){
+         return true;
+      }
+      return false;
+   }
+
    optional<section_type> ibc_contract::get_table_sections_reverse_nth( uint64_t nth ){
       auto p = get_table_reverse_nth_row_obj( account, account, N(sections), nth );
       if ( p.valid() ){
@@ -524,76 +579,17 @@ namespace eosio { namespace ibc {
       return optional<section_type>();
    }
 
-
-
-   void test(){
-      if ( my_impl->contract->has_contract() ){
-         ilog("--------- ibc contract has contract ---------");
-      } else {
-         ilog("--------- ibc contract has not contract ---------");
+   optional<global_state> ibc_contract::get_global_singleton(){
+      auto p = get_singleton( account, account, N(global) );
+      if ( p.valid() ){
+         auto obj = *p;
+         fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
+         global_state result;
+         fc::raw::unpack( ds, result );
+         return result;
       }
-
-      if ( my_impl->contract->initialized() ){
-         ilog("--------- ibc contract has initialized ---------");
-      } else {
-         ilog("--------- ibc contract has not initialized ---------");
-      }
-
-
+      return optional<global_state>();
    }
-//      get_table_sections_reverse_nth(0);
-//      get_table_sections_reverse_nth(1);
-//      get_table_sections_reverse_nth(2);
-//
-//      auto p0 = get_table_last_row(N(eos222333ibc),N(eos222333ibc) ,N(rmtlcltrxs), 0);
-//      auto p1 = get_table_last_row(N(eos222333ibc),N(eos222333ibc) ,N(rmtlcltrxs), 1);
-//      auto p2 = get_table_last_row(N(eos222333ibc),N(eos222333ibc) ,N(rmtlcltrxs), 2);
-//
-//      if ( p0.valid()){
-//         auto obj = *p0;
-//         auto s = to_hex(obj.value.data(), obj.value.size());
-//         ilog("--------0---size--${n}", ("n", obj.value.size()));
-//         ilog("--------0---------${n}", ("n", s));
-//      }
-//
-//
-//      if ( p1.valid()){
-//         auto obj = *p1;
-//         auto s = to_hex(obj.value.data(), obj.value.size());
-//         ilog("--------1---size--${n}", ("n", obj.value.size()));
-//         ilog("--------1---------${n}", ("n", s));
-//      }
-//
-//      if ( p2.valid()){
-//         auto obj = *p2;
-//         auto s = to_hex(obj.value.data(), obj.value.size());
-//         ilog("--------2---size--${n}", ("n", obj.value.size()));
-//         ilog("--------2---------${n}", ("n", s));
-//      }
-
-
-//      fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
-//      read_only::get_currency_stats_result result;
-//
-//      fc::raw::unpack(ds, result.supply);
-//      fc::raw::unpack(ds, result.max_supply);
-//      fc::raw::unpack(ds, result.issuer);
-
-//      std::vector<char> buff;
-//      buff.reserve(110);
-//      buff.resize(100);
-//
-//      if( ds.valid() ){
-//         ds.read(buff.data(),90);
-//      }
-
-
-//      ilog("-----------------------${n}", ("n", to_hex(buff)));
-
-//      ilog("0000000000------------------");
-
-//   }
-
 
 
 //   void ibc_contract::chain_init(){
@@ -627,15 +623,9 @@ namespace eosio { namespace ibc {
 
 //   }
 
-
-
-
-
    class dispatch_manager {
 
    };
-
-
 
    //--------------- connection ---------------
    
@@ -799,7 +789,6 @@ namespace eosio { namespace ibc {
             while (conn->out_queue.size() > 0) {
                conn->out_queue.pop_front();
             }
-//            conn->enqueue_sync_block();
             conn->do_queue_write();
          }
          catch(const std::exception &ex) {
@@ -1193,10 +1182,6 @@ namespace eosio { namespace ibc {
          wlog("Handshake message validation: token field invalid");
          valid = false;
       }
-      if ( msg.chain_id != sidechain_id ) {
-         wlog("Handshake message validation: sidechain id mismatch");
-         valid = false;
-      }
       return valid;
    }
 
@@ -1282,13 +1267,49 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const go_away_message &msg ) {
-      ilog("handle_message == go_away_message ");
-
+      string rsn = reason_str( msg.reason );
+      peer_ilog(c, "received go_away_message");
+      ilog( "received a go away message from ${p}, reason = ${r}",
+            ("p", c->peer_name())("r",rsn));
+      c->no_retry = msg.reason;
+      if(msg.reason == duplicate ) {
+         c->node_id = msg.node_id;
+      }
+      c->flush_queues();
+      close (c);
    }
 
    void ibc_plugin_impl::handle_message(connection_ptr c, const time_message &msg) {
-      ilog("handle_message == time_message ");
+      peer_ilog(c, "received time_message");
+      /* We've already lost however many microseconds it took to dispatch
+       * the message, but it can't be helped.
+       */
+      msg.dst = c->get_time();
 
+      // If the transmit timestamp is zero, the peer is horribly broken.
+      if(msg.xmt == 0)
+         return;                 /* invalid timestamp */
+
+      if(msg.xmt == c->xmt)
+         return;                 /* duplicate packet */
+
+      c->xmt = msg.xmt;
+      c->rec = msg.rec;
+      c->dst = msg.dst;
+
+      if(msg.org == 0)
+      {
+         c->send_time(msg);
+         return;  // We don't have enough data to perform the calculation yet.
+      }
+
+      c->offset = (double(c->rec - c->org) + double(msg.xmt - c->dst)) / 2;
+      double NsecPerUsec{1000};
+
+      if(logger.is_enabled(fc::log_level::all))
+         logger.log(FC_LOG_MESSAGE(all, "Clock offset is ${o}ns (${us}us)", ("o", c->offset)("us", c->offset/NsecPerUsec)));
+      c->org = 0;
+      c->rec = 0;
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_heartbeat_message &msg) {
@@ -1337,44 +1358,60 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_ibc_contract_timer() {
+      ibc_contract_checker();
       ibc_contract_check->expires_from_now (ibc_contract_interval);
       ibc_contract_check->async_wait ([this](boost::system::error_code ec) {
          start_ibc_contract_timer();
          if (ec) {
             wlog ("start_ibc_contract_timer error: ${m}", ("m", ec.message()));
          }
-         ilog("=====  start_ibc_contract_timer  =====");
-
-         test();
-
-
-         if ( my_impl->contract->has_contract() ){
-            ilog("--------- ibc contract has contract ---------");
-         } else {
-            ilog("--------- ibc contract has not contract ---------");
-         }
-
-         if ( my_impl->contract->initialized() ){
-            ilog("--------- ibc contract has initialized ---------");
-         } else {
-            ilog("--------- ibc contract has not initialized ---------");
-         }
-/**
- * 检查是否有需要转发的交易
- * 检查最后一个section 是否valid
- */
-
       });
    }
 
+   void ibc_plugin_impl::ibc_contract_checker() {
+      if ( contract_state == none ){
+         wlog("ibc contract does not exist");
+         contract->get_basic_info();
+         return;
+      }
+
+      if ( !contract->lib_depth_valid() ){
+         wlog("ibc contract global singleton config lib_depth not valid");
+         contract->get_basic_info();
+         return;
+      }
+
+      lwc_heartbeat_message msg;
+      msg.state = contract_state;
+      if ( contract_state == working || contract_state == stoped ){
+         auto p = my_impl->contract->get_table_sections_reverse_nth();
+         if ( p.valid() ){
+            auto obj = *p;
+            msg.ls_first_num = obj.first;
+//            msg.ls_first_id = ;
+            msg.ls_last_num = obj.last;
+//            msg.ls_last_id = ;
+            msg.ls_lib_num = std::max( obj.last - contract->lwc_lib_depth, obj.first );
+//            msg.ls_lib_id = ;
+            msg.ls_valid = obj.valid;
+         }
+      }
+
+      for (auto &c : connections ) {
+         if (c->socket->is_open()) {
+            c->enqueue( msg, true);
+         }
+      }
+   }
+
    void ibc_plugin_impl::start_chain_timer() {
+      chain_checker();
       chain_check->expires_from_now (chain_interval);
       chain_check->async_wait ([this](boost::system::error_code ec) {
          start_chain_timer();
          if (ec) {
             wlog ("start_chain_timer error: ${m}", ("m", ec.message()));
          }
-         ilog("=====  start_chain_timer  =====");
       });
    }
 
@@ -1385,23 +1422,6 @@ namespace eosio { namespace ibc {
        * 实时监控bp列表是否有变化
        * 至少每个小时同步一次数据
        */
-
-
-
-
-
-
-
-   }
-
-   void ibc_plugin_impl::ibc_contract_checker() {
-      //检查是否是跟上状态
-
-
-
-
-
-
    }
 
    void ibc_plugin_impl::ticker() {
@@ -1468,38 +1488,19 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::accepted_block_header(const block_state_ptr& block) {
       fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
-      ilog ("======== 11 ===============");
    }
 
    void ibc_plugin_impl::accepted_block(const block_state_ptr& block) {
       fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
-//      dispatcher->bcast_block(*block->block);
-      ilog ("======== 22 ===============");
    }
 
    void ibc_plugin_impl::irreversible_block(const block_state_ptr&block) {
-      /**
-       * 每小时记录一个blockmroot
-       */
-
       fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
-      ilog ("======== 33 ======33=========");
-   }
-
-   void ibc_plugin_impl::accepted_transaction(const transaction_metadata_ptr& md) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", md->id));
-//      dispatcher->bcast_transaction(md->packed_trx);
-      ilog ("======== 44 ===============");
-   }
-
-   void ibc_plugin_impl::applied_transaction(const transaction_trace_ptr& txn) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", txn->id));
-      ilog ("======== 55 ===============");
+      // 每小时记录一个blockmroot
    }
 
    void ibc_plugin_impl::accepted_confirmation(const header_confirmation& head) {
       fc_dlog(logger,"signaled, id = ${id}",("id", head.block_id));
-      ilog ("======== 66 ===============");
    }
 
    bool ibc_plugin_impl::authenticate_peer(const handshake_message& msg) const {
@@ -1799,6 +1800,7 @@ namespace eosio { namespace ibc {
       chain::controller&cc = my->chain_plug->chain();
       cc.irreversible_block.connect( boost::bind(&ibc_plugin_impl::irreversible_block, my.get(), _1));
 
+      my->contract->get_basic_info();
       my->start_monitors();
 
       for( auto seed_node : my->supplied_peers ) {

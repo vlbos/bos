@@ -52,9 +52,14 @@ namespace eosio { namespace ibc {
       std::vector<uint32_t>   block_nums;
    };
 
+   struct global_state {
+      uint32_t    lib_depth;
+   };
+
 }}
 
 //FC_REFLECT( eosio::connection_status, (peer)(connecting)(syncing)(last_handshake) )
 
 
 FC_REFLECT( eosio::ibc::section_type, (first)(last)(np_num)(valid)(producers)(block_nums) )
+FC_REFLECT( eosio::ibc::global_state, (lib_depth) )

@@ -87,8 +87,8 @@ namespace eosio {
        * "ls" or "lwcls" means eosio light weight client last section in ibc contract
        */
 
-      enum lwc_contract_state {
-         none, ///< ibc contract has not deployed
+      enum ibc_contract_state {
+         none, ///< ibc contract has not deployed or account not exist
          deployed, ///< ibc constract has deployed, but not initialized
          working, ///< ibc constract has been initialized and in working state
          stoped ///< ibc contract stoped for some reason
@@ -99,7 +99,7 @@ namespace eosio {
        * and when the lwcls has any update broadcast this too.
        */
       struct lwc_heartbeat_message {
-         lwc_contract_state state;
+         ibc_contract_state state;
          uint32_t       ls_first_num;
          uint32_t       ls_last_num;
          uint32_t       ls_lib_num;
