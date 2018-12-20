@@ -51,6 +51,7 @@ namespace eosio { namespace ibc {
    using fc::time_point_sec;
    using eosio::chain::transaction_id_type;
    using eosio::chain::name;
+   using mvo = fc::mutable_variant_object;
    namespace bip = boost::interprocess;
 
    class connection;
@@ -432,6 +433,8 @@ namespace eosio { namespace ibc {
 
 
    };
+   
+   // contract related functions
 
    optional<key_value_object>  get_table_reverse_nth_row_obj( const name& code, const name& scope, const name& table, const uint64_t nth = 0 ) {
       const auto& d = app().get_plugin<chain_plugin>().chain().db();
@@ -483,6 +486,58 @@ namespace eosio { namespace ibc {
       return optional<key_value_object>();
    }
 
+   static const uint32_t default_expiration_delta = 30;  ///< 30 seconds
+   static const fc::microseconds abi_serializer_max_time{500 * 1000};   ///< 500ms
+   
+   void set_transaction_headers( transaction& trx, uint32_t expiration = default_expiration_delta, uint32_t delay_sec = 0 ) {
+      trx.expiration = my_impl->chain_plug->chain().head_block_time() + fc::seconds(expiration);
+      trx.set_reference_block( my_impl->chain_plug->chain().last_irreversible_block_id() );
+
+      trx.max_net_usage_words = 0; // No limit
+      trx.max_cpu_usage_ms = 0; // No limit
+      trx.delay_sec = delay_sec;
+   }
+
+   action get_action( account_name code, action_name acttype, vector<permission_level> auths, const bytes& data ) {
+         action act;
+         act.account = code;
+         act.name = acttype;
+         act.authorization = auths;
+         act.data = data;
+         return act;
+   }
+
+   void push_transaction( signed_transaction& trx ) {
+      auto next = [](const fc::static_variant<fc::exception_ptr, chain_apis::read_write::push_transaction_results>& result){
+         if (result.contains<fc::exception_ptr>()) {
+            try {
+               result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
+            } catch (...) {
+              elog("push_transaction failed");
+            }
+         } else {
+            auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
+            ilog("pushed transaction: ${id}", ( "id", trx_id ));
+         }
+      };
+
+      my_impl->chain_plug->get_read_write_api().push_transaction( mvo()("packed_trx", packed_transaction(trx)), next );
+   }
+
+   bool push_action( action actn ) {
+      if ( my_impl->private_keys.empty() ){
+         wlog("ibc contract account active key not found, can not execute action");
+         return false;
+      }
+
+      signed_transaction trx;
+      trx.actions.emplace_back( actn );
+      set_transaction_headers( trx );
+      trx.sign( my_impl->private_keys.begin()->second, my_impl->chain_plug->chain().get_chain_id() );
+      push_transaction( trx );
+   }
+
+
 #define min_lwc_lib_depth 50
 #define max_lwc_lib_depth 200
    
@@ -492,7 +547,7 @@ namespace eosio { namespace ibc {
       ibc_contract(  name contract );
 
       // actions
-      void chain_init();
+      void chain_init( const lwc_init_message &msg );
       void newsection();
       void addheaders();
 
@@ -592,36 +647,21 @@ namespace eosio { namespace ibc {
    }
 
 
-//   void ibc_contract::chain_init(){
-      // get last recored
-//      auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
+   void ibc_contract::chain_init( const lwc_init_message &msg ){
 
-//      get_table_rows_params p;
-//      p.json = true;
-//      p.code = ;
-//      p.scope = ;
-//      p.table = ;
-//      p.table_key = ;
-//      p. = ;
-//      p. = ;
-//      p. = ;
-//      p. = ;
-//
-//
-//      ;
-//      string      ;
-//      name        ;
-//      string      ;
-//      string      lower_bound;
-//      string      upper_bound;
-//      uint32_t    limit = 10;
-//      string      key_type;  // type of key specified by index_position
-//      string      index_position; // 1 - primary (first), 2 - secondary index (in order defined by multi_index), 3 - third index, etc
-//      string      encode_type{"dec"}; //dec, hex , default=dec
-//
-//      ro_api.get_table_rows()
 
-//   }
+      auto str = fc::json::to_string( mvo()
+         ("header",           msg.header)
+         ("active_schedule",  msg.active_schedule)
+         ("blockroot_merkle", msg.blockroot_merkle));
+
+      bytes data( str.begin(), str.end() );
+      auto actn = get_action( account, N(chaininit), vector<permission_level>{{ account, config::active_name}}, data );
+
+      if ( !push_action( actn ) ){
+         elog("push_action failed");
+      }
+   }
 
    class dispatch_manager {
 
@@ -1325,7 +1365,7 @@ namespace eosio { namespace ibc {
          while ( p == block_state_ptr() && depth >= 10 ){
             depth /= 2;
             block_state_ptr p = cc.fetch_block_state_by_number( head_num - depth );
-            ilog("didn't get block state of ${n}", ("n", head_num - depth ));
+            ilog("didn't get block_state_ptr of block num: ${n}", ("n", head_num - depth ));
          }
 
          if ( p == block_state_ptr() ){
@@ -1358,6 +1398,11 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_init_message &msg) {
       peer_ilog(c, "received lwc_init_message");
+
+      contract->get_basic_info();
+      if ( contract_state == deployed && contract->lib_depth_valid() ){
+         contract->chain_init( msg );
+      }
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data &msg) {
