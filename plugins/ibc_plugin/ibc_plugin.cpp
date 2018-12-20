@@ -1725,6 +1725,8 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin::set_program_options( options_description& /*cli*/, options_description& cfg )
    {
+      auto default_priv_key = private_key_type::regenerate<fc::ecc::private_key_shim>(fc::sha256::hash(std::string("nathan")));
+
       cfg.add_options()
          ( "ibc-listen-endpoint", bpo::value<string>()->default_value( "0.0.0.0:5678" ), "The actual host:port used to listen for incoming ibc connections.")
          ( "ibc-server-address", bpo::value<string>(), "An externally accessible host:port for identifying this node. Defaults to ibc-listen-endpoint.")
@@ -1733,7 +1735,11 @@ namespace eosio { namespace ibc {
          ( "ibc-agent-name", bpo::value<string>()->default_value("\"BOS IBC Agent\""), "The name supplied to identify this node amongst the peers.")
          ( "ibc-allowed-connection", bpo::value<vector<string>>()->multitoken()->default_value({"any"}, "any"), "Can be 'any' or 'specified' or 'none'. If 'specified', peer-key must be specified at least once.")
          ( "ibc-peer-key", bpo::value<vector<string>>()->composing()->multitoken(), "Optional public key of peer allowed to connect.  May be used multiple times.")
-         ( "ibc-peer-private-key", bpo::value<vector<string>>()->composing()->multitoken(), "Tuple of [PublicKey, WIF private key] (may specify multiple times)")
+//         ( "ibc-peer-private-key", bpo::value<vector<string>>()->composing()->multitoken(), "Tuple of [PublicKey, Private key] (may specify multiple times)")
+         ( "ibc-peer-private-key", boost::program_options::value<vector<string>>()->composing()->multitoken()->default_value({std::string(default_priv_key.get_public_key()) + "=KEY:" + std::string(default_priv_key)}, std::string(default_priv_key.get_public_key()) + "=KEY:" + std::string(default_priv_key)),
+           "Key=Value pairs in the form <public-key>=KEY:<private-key>\n"
+           "   <public-key>   \tis a string form of a vaild EOSIO public key\n\n"
+           "   <private-key>  \tis a string form of a valid EOSIO private key which maps to the provided public key\n\n")
          ( "ibc-max-clients", bpo::value<int>()->default_value(def_max_clients), "Maximum number of clients from which connections are accepted, use 0 for no limit")
          ( "ibc-connection-cleanup-period", bpo::value<int>()->default_value(def_conn_retry_wait), "number of seconds to wait before cleaning up dead connections")
          ( "ibc-max-cleanup-time-msec", bpo::value<int>()->default_value(10), "max connection cleanup time per cleanup call in millisec")
@@ -1843,12 +1849,34 @@ namespace eosio { namespace ibc {
             }
          }
 
-         if( options.count( "ibc-peer-private-key" )) {
-            const std::vector<std::string> key_id_to_wif_pair_strings = options["ibc-peer-private-key"].as<std::vector<std::string>>();
-            for( const std::string& key_id_to_wif_pair_string : key_id_to_wif_pair_strings ) {
-               auto key_id_to_wif_pair = dejsonify<std::pair<chain::public_key_type, std::string>>(
-                  key_id_to_wif_pair_string );
-               my->private_keys[key_id_to_wif_pair.first] = fc::crypto::private_key( key_id_to_wif_pair.second );
+//         if( options.count( "ibc-peer-private-key" )) {
+//            const std::vector<std::string> key_id_to_pri_pair_strings = options["ibc-peer-private-key"].as<std::vector<std::string>>();
+//            for( const std::string& key_id_to_pri_pair_string : key_id_to_pri_pair_strings ) {
+//               auto key_id_to_pri_pair = dejsonify<std::pair<chain::public_key_type, std::string>>( key_id_to_pri_pair_string );
+//               my->private_keys[key_id_to_pri_pair.first] = private_key_type( key_id_to_pri_pair.second );
+//            }
+//         }
+
+         if( options.count("ibc-peer-private-key") ) {
+            const std::vector<std::string> key_spec_pairs = options["ibc-peer-private-key"].as<std::vector<std::string>>();
+            for (const auto& key_spec_pair : key_spec_pairs) {
+               try {
+                  auto delim = key_spec_pair.find("=");
+                  EOS_ASSERT(delim != std::string::npos, plugin_config_exception, "Missing \"=\" in the key spec pair");
+                  auto pub_key_str = key_spec_pair.substr(0, delim);
+                  auto spec_str = key_spec_pair.substr(delim + 1);
+
+                  auto spec_delim = spec_str.find(":");
+                  EOS_ASSERT(spec_delim != std::string::npos, plugin_config_exception, "Missing \":\" in the key spec pair");
+                  auto spec_type_str = spec_str.substr(0, spec_delim);
+                  auto spec_data = spec_str.substr(spec_delim + 1);
+
+                  auto pubkey = public_key_type(pub_key_str);
+
+                  my->private_keys[pubkey] = private_key_type(spec_data);
+               } catch (...) {
+                  elog("Malformed ibc-peer-private-key: \"${val}\", ignoring!", ("val", key_spec_pair));
+               }
             }
          }
 
