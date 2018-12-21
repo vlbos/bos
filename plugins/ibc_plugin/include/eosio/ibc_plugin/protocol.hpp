@@ -104,21 +104,25 @@ namespace eosio {
          }
       }
 
+      struct lwc_section_type {
+         lwc_section_type():first_num(0),last_num(0),lib_num(0),first_id(),last_id(),lib_id(),valid(false){}
+         uint32_t       first_num;
+         uint32_t       last_num;
+         uint32_t       lib_num;
+         block_id_type  first_id;
+         block_id_type  last_id;
+         block_id_type  lib_id;
+         bool           valid;
+      };
+
       /**
        * this hearbeat message should broadcast with time_message
        * and when the lwcls has any update broadcast this too.
        */
       struct lwc_heartbeat_message {
-         lwc_heartbeat_message(): state(none),ls_first_num(0),ls_last_num(0),ls_lib_num(0),
-                                  ls_first_id(),ls_last_id(),ls_lib_id(),ls_valid(false){}
-         ibc_contract_state state;
-         uint32_t       ls_first_num;
-         uint32_t       ls_last_num;
-         uint32_t       ls_lib_num;
-         block_id_type  ls_first_id;
-         block_id_type  ls_last_id;
-         block_id_type  ls_lib_id;
-         bool           ls_valid;
+         lwc_heartbeat_message(): ls(),state(none){}
+         lwc_section_type     ls;   ///< lwc last section info
+         ibc_contract_state   state;
       };
 
       /**
@@ -132,14 +136,8 @@ namespace eosio {
       };
 
       struct lwcls_detail_message {
-         lwcls_detail_message():first_num(0),last_num(0),lib_num(0),first_id(),last_id(),lib_id(),valid(false),ids(){}
-         uint32_t       first_num;
-         uint32_t       last_num;
-         uint32_t       lib_num;
-         block_id_type  first_id;
-         block_id_type  last_id;
-         block_id_type  lib_id;
-         bool           valid;
+         lwcls_detail_message():ls(),ids(){}
+         lwc_section_type           ls;
          std::vector<block_id_type> ids;
       };
 
@@ -210,9 +208,11 @@ FC_REFLECT( eosio::ibc::handshake_message,
 FC_REFLECT( eosio::ibc::go_away_message, (reason)(node_id) )
 FC_REFLECT( eosio::ibc::time_message, (org)(rec)(xmt)(dst) )
 
-FC_REFLECT( eosio::ibc::lwc_heartbeat_message, (state)(ls_first_num)(ls_last_num)(ls_lib_num)(ls_first_id)(ls_last_id)(ls_lib_id)(ls_valid) )
+FC_REFLECT( eosio::ibc::lwc_section_type, (first_num)(last_num)(lib_num)(first_id)(last_id)(lib_id)(valid) )
+FC_REFLECT( eosio::ibc::lwc_heartbeat_message, (ls)(state) )
 FC_REFLECT( eosio::ibc::request_lwcls_message, (num) )
-FC_REFLECT( eosio::ibc::lwcls_detail_message, (first_num)(last_num)(lib_num)(first_id)(last_id)(lib_id)(valid)(ids) )
+FC_REFLECT( eosio::ibc::lwcls_detail_message, (ls)(ids) )
+
 FC_REFLECT( eosio::ibc::lwc_init_message, (header)(active_schedule)(blockroot_merkle)  )
 FC_REFLECT( eosio::ibc::lwc_section_data, (headers)(blockroot_merkle)  )
 FC_REFLECT( eosio::ibc::lwc_ibctrx_data, (block_id)(trx)(merkle_path)  )

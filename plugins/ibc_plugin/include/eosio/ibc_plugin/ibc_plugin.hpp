@@ -41,7 +41,9 @@ namespace eosio { namespace ibc {
         std::unique_ptr<class ibc_plugin_impl> my;
    };
 
-   // ibc contract table structs
+
+
+   // ---- ibc contract table structs ----
 
    struct global_state {
       uint32_t    lib_depth;
@@ -68,7 +70,7 @@ namespace eosio { namespace ibc {
       public_key_type            block_signing_key;
    };
 
-   // ibc contract push action related structs
+   //  ---- ibc contract push action related structs ----
    struct new_section_params {
       signed_block_header  header;
       incremental_merkle   blockroot_merkle;

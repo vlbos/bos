@@ -168,6 +168,8 @@ namespace eosio { namespace ibc {
       void start_chain_timer( );
       void start_monitors( );
 
+      lwc_section_type get_lwcls_info();
+
       void connection_monitor(std::weak_ptr<connection> from_connection);
 
       /** Peer heartbeat ticker.
@@ -307,6 +309,9 @@ namespace eosio { namespace ibc {
 
       static const size_t            ts_buffer_size{32};
       char                           ts[ts_buffer_size];   //!< working buffer for making human readable timestamps
+
+      lwc_section_type               lwcls_info;
+      time_point                     lwcls_info_update_time;
 
       bool connected();
       bool current();
@@ -564,6 +569,7 @@ namespace eosio { namespace ibc {
       // tables
       optional<section_type> get_table_sections_reverse_nth( uint64_t nth = 0 );
       optional<block_header_state_type> get_table_chaindb_by_block_num( uint64_t num );
+      block_id_type get_block_id_by_block_num( uint64_t num );
       optional<global_state> get_global_singleton();
 
       // others
@@ -664,6 +670,14 @@ namespace eosio { namespace ibc {
          }
       } FC_LOG_AND_DROP()
       return optional<block_header_state_type>();
+   }
+
+   block_id_type ibc_contract::get_block_id_by_block_num( uint64_t num ){
+      auto p = get_table_chaindb_by_block_num( num );
+      if ( p.valid() ){
+         return p->block_id;
+      }
+      return block_id_type();
    }
 
    optional<global_state> ibc_contract::get_global_singleton(){
@@ -1435,7 +1449,7 @@ namespace eosio { namespace ibc {
       peer_ilog(c, "received lwc_heartbeat_message");
 
       if ( msg.state == deployed ) {
-         // 发送初始化
+         // send lwc_init_message
          controller &cc = chain_plug->chain();
          uint32_t head_num = cc.fork_db_head_block_num();
          uint32_t depth = 200;
@@ -1448,7 +1462,7 @@ namespace eosio { namespace ibc {
          }
 
          if ( p == block_state_ptr() ){
-            ilog("didn't get any block state finally");
+            ilog("didn't get any block state finally, wait");
             return;
          }
 
@@ -1464,6 +1478,25 @@ namespace eosio { namespace ibc {
 
          ilog("send lwc_init_message");
          c->enqueue( msg, true);
+         return;
+      }
+
+      // validate msg
+      auto check_id = [=]( uint32_t block_num, block_id_type id ) -> bool {
+         auto ret_id = my_impl->chain_plug->chain().get_block_id_for_num( block_num );
+         return ret_id == id;
+      };
+
+      if ( check_id( msg.ls.first_num, msg.ls.first_id ) &&
+      check_id( msg.ls.lib_num, msg.ls.lib_id ) &&
+      check_id( msg.ls.last_num, msg.ls.last_id )){
+         c->lwcls_info = msg.ls;
+         c->lwcls_info_update_time = fc::time_point::now();
+      } else {
+         c->lwcls_info = lwc_section_type();
+         c->lwcls_info_update_time = fc::time_point();
+         elog("received lwc_heartbeat_message not correct");
+         idump((msg.ls))
       }
    }
 
@@ -1526,10 +1559,7 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::ibc_contract_checker() {
 
-      ilog("++++++++++++========");
-      test();
-      return;
-
+      ilog("++++++++++++========");test();return;
 
       if ( contract_state == none ){
          wlog("ibc contract does not exist");
@@ -1550,13 +1580,13 @@ namespace eosio { namespace ibc {
          auto p = my_impl->contract->get_table_sections_reverse_nth();
          if ( p.valid() ){
             auto obj = *p;
-            msg.ls_first_num = obj.first;
-//            msg.ls_first_id = ;
-            msg.ls_last_num = obj.last;
-//            msg.ls_last_id = ;
-            msg.ls_lib_num = std::max( obj.last - contract->lwc_lib_depth, obj.first );
-//            msg.ls_lib_id = ;
-            msg.ls_valid = obj.valid;
+            msg.ls.first_num = obj.first;
+            msg.ls.first_id = contract->get_block_id_by_block_num( msg.ls.first_num );
+            msg.ls.last_num = obj.last;
+            msg.ls.last_id = contract->get_block_id_by_block_num( msg.ls.last_num );
+            msg.ls.lib_num = std::max( obj.last - contract->lwc_lib_depth, obj.first );
+            msg.ls.lib_id = contract->get_block_id_by_block_num( msg.ls.lib_num );
+            msg.ls.valid = obj.valid;
          }
       }
 
@@ -1585,6 +1615,23 @@ namespace eosio { namespace ibc {
        * 实时监控bp列表是否有变化
        * 至少每个小时同步一次数据
        */
+   }
+
+
+
+   lwc_section_type ibc_plugin_impl::get_lwcls_info() {
+
+
+      for (auto &c : connections ) {
+         if ( c->lwcls_info_update_time != fc::time_point() &&
+         c->lwcls_info != lwc_section_type() &&
+         fc::time_point::now() - c->lwcls_info_update_time < 30 * pow(10, 6) ){
+
+         }
+
+      }
+
+
    }
 
    void ibc_plugin_impl::ticker() {
