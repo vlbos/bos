@@ -56,7 +56,7 @@ namespace eosio { namespace ibc {
 
    class connection;
 
-   class sync_manager;
+   class lwc_manager;
    class dispatch_manager;
    class ibc_contract;
 
@@ -91,7 +91,7 @@ namespace eosio { namespace ibc {
 
       std::set< connection_ptr >       connections;
       bool                             done = false;
-      unique_ptr< sync_manager >       sync_master;
+      unique_ptr< lwc_manager >        lwc_master;
       unique_ptr< dispatch_manager >   dispatcher;
       unique_ptr< ibc_contract >       contract;
       ibc_contract_state               contract_state = none;
@@ -407,34 +407,40 @@ namespace eosio { namespace ibc {
 
 
 
+   //--------------- lwc_manager ---------------
 
-   class sync_manager {
+   class lwc_manager {
    public:
 
-      enum stages {
-         normal,
-         in_get_lwc_last_section,
-         in_sync_to_lwc
-      };
-
-      std::vector<std::pair<uint32_t,block_id_type>> lwc_last_section;
-
-
-      uint32_t    lwc_ls_first;  // light weight client last section first block number.
-      uint32_t    lwc_ls_last;
-      uint32_t    lwc_ls_lib;
-
-
-
-      void get_lwc_last_section();
-      void get_lwc_last_section_ids();
-      void append_lwc_last_section();
-      void new_lwc_section();
+//      enum stages {
+//         normal,
+//         in_get_lwc_last_section,
+//         in_sync_to_lwc
+//      };
+//
+//      std::vector<std::pair<uint32_t,block_id_type>> lwc_last_section;
+//
+//
+//      uint32_t    lwc_ls_first;  // light weight client last section first block number.
+//      uint32_t    lwc_ls_last;
+//      uint32_t    lwc_ls_lib;
+//
+//
+//      void get_lwc_last_section();
+//      void get_lwc_last_section_ids();
+//      void append_lwc_last_section();
+//      void new_lwc_section();
 
 
    };
    
-   // contract related functions
+   // eosio contract related consts and functions
+
+   static const uint32_t default_expiration_delta = 30;  ///< 30 seconds
+   static const fc::microseconds abi_serializer_max_time{500 * 1000}; ///< 500ms
+   static const uint32_t  min_lwc_lib_depth = 50;
+   static const uint32_t  max_lwc_lib_depth = 200;
+
 
    optional<key_value_object>  get_table_reverse_nth_row_obj( const name& code, const name& scope, const name& table, const uint64_t nth = 0 ) {
       const auto& d = app().get_plugin<chain_plugin>().chain().db();
@@ -486,8 +492,7 @@ namespace eosio { namespace ibc {
       return optional<key_value_object>();
    }
 
-   static const uint32_t default_expiration_delta = 30;  ///< 30 seconds
-   static const fc::microseconds abi_serializer_max_time{500 * 1000};   ///< 500ms
+
    
    void set_transaction_headers( transaction& trx, uint32_t expiration = default_expiration_delta, uint32_t delay_sec = 0 ) {
       trx.expiration = my_impl->chain_plug->chain().head_block_time() + fc::seconds(expiration);
@@ -498,36 +503,45 @@ namespace eosio { namespace ibc {
       trx.delay_sec = delay_sec;
    }
 
-   action get_action( account_name code, action_name acttype, vector<permission_level> auths, const bytes& data ) {
+   optional<action> get_action( account_name code, action_name acttype, vector<permission_level> auths, const fc::variant& data ) {
+      try {
+         const auto& acnt = my_impl->chain_plug->chain().get_account(code);
+         auto abi = acnt.get_abi();
+         chain::abi_serializer abis(abi, abi_serializer_max_time);
+
+         string action_type_name = abis.get_action_type(acttype);
+         FC_ASSERT( action_type_name != string(), "unknown action type ${a}", ("a",acttype) );
+
          action act;
          act.account = code;
          act.name = acttype;
          act.authorization = auths;
-         act.data = data;
+         act.data = abis.variant_to_binary(action_type_name, data, abi_serializer_max_time);
          return act;
+      } FC_LOG_AND_DROP()
+      return  optional<action>();
    }
 
    void push_transaction( signed_transaction& trx ) {
-      auto next = [](const fc::static_variant<fc::exception_ptr, chain_apis::read_write::push_transaction_results>& result){
+      auto next = [=](const fc::static_variant<fc::exception_ptr, chain_apis::read_write::push_transaction_results>& result){
          if (result.contains<fc::exception_ptr>()) {
             try {
                result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
-            } catch (...) {
-              elog("push_transaction failed");
-            }
+            } FC_LOG_AND_DROP()
+            elog("push_transaction failed");
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
             ilog("pushed transaction: ${id}", ( "id", trx_id ));
          }
       };
 
-      my_impl->chain_plug->get_read_write_api().push_transaction( mvo()("packed_trx", packed_transaction(trx)), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object( mvo(packed_transaction(trx)) ), next );
    }
 
-   bool push_action( action actn ) {
+   void push_action( action actn ) {
       if ( my_impl->private_keys.empty() ){
          wlog("ibc contract account active key not found, can not execute action");
-         return false;
+         return;
       }
 
       signed_transaction trx;
@@ -538,21 +552,18 @@ namespace eosio { namespace ibc {
    }
 
 
-#define min_lwc_lib_depth 50
-#define max_lwc_lib_depth 200
-   
-   
    class ibc_contract {
    public:
       ibc_contract(  name contract );
 
       // actions
       void chain_init( const lwc_init_message &msg );
-      void newsection();
-      void addheaders();
+      void newsection( const new_section_params &sct );
+      void addheaders( const std::vector<signed_block_header> headers );
 
       // tables
       optional<section_type> get_table_sections_reverse_nth( uint64_t nth = 0 );
+      optional<block_header_state_type> get_table_chaindb_by_block_num( uint64_t num );
       optional<global_state> get_global_singleton();
 
       // others
@@ -565,8 +576,7 @@ namespace eosio { namespace ibc {
    private:
       bool has_contract();
       bool initialized();
-      
-   private:
+
       name account;
    };
 
@@ -634,6 +644,28 @@ namespace eosio { namespace ibc {
       return optional<section_type>();
    }
 
+   optional<block_header_state_type> ibc_contract::get_table_chaindb_by_block_num( uint64_t num ){
+      chain_apis::read_only::get_table_rows_params par;
+      par.json = true;  // must be true
+      par.code = account;
+      par.scope = account.to_string();
+      par.table = N(chaindb);
+      par.table_key = "block_num";
+      par.lower_bound = to_string(num);
+      par.upper_bound = to_string(num + 1);
+      par.limit = 1;
+      par.key_type = "i64";
+      par.index_position = "1";
+
+      try {
+         auto result = my_impl->chain_plug->get_read_only_api().get_table_rows( par );
+         if ( result.rows.size() != 0 ){
+            return result.rows.front().as<block_header_state_type>();
+         }
+      } FC_LOG_AND_DROP()
+      return optional<block_header_state_type>();
+   }
+
    optional<global_state> ibc_contract::get_global_singleton(){
       auto p = get_singleton( account, account, N(global) );
       if ( p.valid() ){
@@ -648,20 +680,67 @@ namespace eosio { namespace ibc {
 
 
    void ibc_contract::chain_init( const lwc_init_message &msg ){
+      auto actn = get_action( account, N(chaininit), vector<permission_level>{{ account, config::active_name}}, mvo()
+      ("header",            fc::raw::pack(msg.header))
+      ("active_schedule",   msg.active_schedule)
+      ("blockroot_merkle",  msg.blockroot_merkle));
 
-
-      auto str = fc::json::to_string( mvo()
-         ("header",           msg.header)
-         ("active_schedule",  msg.active_schedule)
-         ("blockroot_merkle", msg.blockroot_merkle));
-
-      bytes data( str.begin(), str.end() );
-      auto actn = get_action( account, N(chaininit), vector<permission_level>{{ account, config::active_name}}, data );
-
-      if ( !push_action( actn ) ){
-         elog("push_action failed");
+      if ( ! actn.valid() ){
+         elog("chain_init: get action failed");
+         return;
       }
+
+      push_action( *actn );
    }
+
+   void ibc_contract::newsection( const new_section_params &sct ){
+      auto actn = get_action( account, N(newsection), vector<permission_level>{{ account, config::active_name}}, mvo()
+         ("header",            fc::raw::pack(sct.header))
+         ("blockroot_merkle",  sct.blockroot_merkle));
+
+      if ( ! actn.valid() ){
+         elog("newsection: get action failed");
+         return;
+      }
+
+      push_action( *actn );
+   }
+
+   void ibc_contract::addheaders( const std::vector<signed_block_header> headers ){
+      auto actn = get_action( account, N(addheaders), vector<permission_level>{{ account, config::active_name}}, mvo()
+         ("headers",            fc::raw::pack(headers)));
+
+      if ( ! actn.valid() ){
+         elog("addheaders: get action failed");
+         return;
+      }
+
+      push_action( *actn );
+   }
+
+
+
+
+
+
+
+   void test(){
+      ibc_contract ct(N(eos222333ibc));
+
+      auto r = ct.get_table_chaindb_by_block_num(22960);
+
+      if (r.valid()){
+         idump((*r));
+         ilog("_=====================");
+      } else{
+         ilog("_+_+_+_+rrrorr++++++");
+      }
+
+   }
+
+
+
+   //--------------- dispatch_manager ---------------
 
    class dispatch_manager {
 
@@ -1446,6 +1525,12 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::ibc_contract_checker() {
+
+      ilog("++++++++++++========");
+      test();
+      return;
+
+
       if ( contract_state == none ){
          wlog("ibc contract does not exist");
          contract->get_basic_info();
@@ -1457,8 +1542,6 @@ namespace eosio { namespace ibc {
          contract->get_basic_info();
          return;
       }
-
-      ilog("++++++++++++========");
 
       lwc_heartbeat_message msg;
       msg.state = contract_state;
@@ -1771,7 +1854,7 @@ namespace eosio { namespace ibc {
 
          my->network_version_match = options.at( "ibc-version-match" ).as<bool>();
 
-         my->sync_master.reset( new sync_manager );
+         my->lwc_master.reset( new lwc_manager );
          my->dispatcher.reset( new dispatch_manager );
 
          EOS_ASSERT( options.count( "ibc-sidechain-id" ) && options.at("ibc-sidechain-id").as<string>() != string(),

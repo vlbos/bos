@@ -41,7 +41,11 @@ namespace eosio { namespace ibc {
         std::unique_ptr<class ibc_plugin_impl> my;
    };
 
+   // ibc contract table structs
 
+   struct global_state {
+      uint32_t    lib_depth;
+   };
 
    struct section_type {
       uint64_t                first;
@@ -52,14 +56,34 @@ namespace eosio { namespace ibc {
       std::vector<uint32_t>   block_nums;
    };
 
-   struct global_state {
-      uint32_t    lib_depth;
+   struct block_header_state_type {
+      block_header_state_type():block_num(0),block_id(),header(),active_schedule_id(0),
+      pending_schedule_id(0),blockroot_merkle(),block_signing_key(){}
+      uint64_t                   block_num;
+      block_id_type              block_id;
+      signed_block_header        header;
+      uint32_t                   active_schedule_id;
+      uint32_t                   pending_schedule_id;
+      incremental_merkle         blockroot_merkle;
+      public_key_type            block_signing_key;
+   };
+
+   // ibc contract push action related structs
+   struct new_section_params {
+      signed_block_header  header;
+      incremental_merkle   blockroot_merkle;
    };
 
 }}
 
 //FC_REFLECT( eosio::connection_status, (peer)(connecting)(syncing)(last_handshake) )
 
-
-FC_REFLECT( eosio::ibc::section_type, (first)(last)(np_num)(valid)(producers)(block_nums) )
 FC_REFLECT( eosio::ibc::global_state, (lib_depth) )
+FC_REFLECT( eosio::ibc::section_type, (first)(last)(np_num)(valid)(producers)(block_nums) )
+FC_REFLECT( eosio::ibc::new_section_params, (header)(blockroot_merkle) )
+FC_REFLECT( eosio::ibc::block_header_state_type, (block_num)(block_id)(header)(active_schedule_id)(pending_schedule_id)(blockroot_merkle)(block_signing_key) )
+
+
+
+
+
