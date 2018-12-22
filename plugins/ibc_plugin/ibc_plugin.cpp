@@ -585,6 +585,7 @@ namespace eosio { namespace ibc {
       optional<block_header_state_type> get_table_chaindb_by_block_num( uint64_t num );
       block_id_type get_block_id_by_block_num( uint64_t num );
       optional<global_state> get_global_singleton();
+      std::vector<ibctrx_info> get_table_ibctrxs_by_state_up_to( uint32_t block_time_slot );
 
       // others
       void get_basic_info();
@@ -706,6 +707,9 @@ namespace eosio { namespace ibc {
       return optional<global_state>();
    }
 
+   std::vector<ibctrx_info> ibc_contract::get_table_ibctrxs_by_state_up_to( uint32_t block_time_slot ){
+
+   }
 
    void ibc_contract::chain_init( const lwc_init_message &msg ){
       auto actn = get_action( account, N(chaininit), vector<permission_level>{{ account, config::active_name}}, mvo()
@@ -1708,7 +1712,11 @@ namespace eosio { namespace ibc {
          }
       }
 
-      // get ibc transactions from ibc contract and add lwc_manager anchor block number
+      // get ibc transactions from ibc contract
+      // add lwc_manager anchor block number
+
+
+
 
 
 
