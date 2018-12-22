@@ -72,8 +72,8 @@ namespace eosio { namespace ibc {
 
    //  ---- ibc contract push action related structs ----
    struct new_section_params {
-      signed_block_header  header;
-      incremental_merkle   blockroot_merkle;
+      std::vector<signed_block_header>  headers;
+      incremental_merkle                blockroot_merkle;
    };
 
 }}
@@ -82,7 +82,7 @@ namespace eosio { namespace ibc {
 
 FC_REFLECT( eosio::ibc::global_state, (lib_depth) )
 FC_REFLECT( eosio::ibc::section_type, (first)(last)(np_num)(valid)(producers)(block_nums) )
-FC_REFLECT( eosio::ibc::new_section_params, (header)(blockroot_merkle) )
+FC_REFLECT( eosio::ibc::new_section_params, (headers)(blockroot_merkle) )
 FC_REFLECT( eosio::ibc::block_header_state_type, (block_num)(block_id)(header)(active_schedule_id)(pending_schedule_id)(blockroot_merkle)(block_signing_key) )
 
 

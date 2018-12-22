@@ -159,7 +159,7 @@ namespace eosio { namespace ibc {
       void handle_message( connection_ptr c, const lwc_init_message &msg);
       void handle_message( connection_ptr c, const lwc_section_data &msg);
       void handle_message( connection_ptr c, const lwc_ibctrx_data &msg);
-      void handle_message( connection_ptr c, const notice_lwc_block_message &msg);
+      void handle_message( connection_ptr c, const lwc_anchor_block_message &msg);
       void handle_message( connection_ptr c, const lwc_request_message &msg);
 
 
@@ -168,7 +168,8 @@ namespace eosio { namespace ibc {
       void start_chain_timer( );
       void start_monitors( );
 
-      lwc_section_type get_lwcls_info();
+      lwc_section_type get_lwcls_info( );
+      bool head_catched_up( );
 
       void connection_monitor(std::weak_ptr<connection> from_connection);
 
@@ -416,29 +417,42 @@ namespace eosio { namespace ibc {
 
    class lwc_manager {
    public:
-
-//      enum stages {
-//         normal,
-//         in_get_lwc_last_section,
-//         in_sync_to_lwc
-//      };
-//
-//      std::vector<std::pair<uint32_t,block_id_type>> lwc_last_section;
-//
-//
-//      uint32_t    lwc_ls_first;  // light weight client last section first block number.
-//      uint32_t    lwc_ls_last;
-//      uint32_t    lwc_ls_lib;
-//
-//
-//      void get_lwc_last_section();
-//      void get_lwc_last_section_ids();
-//      void append_lwc_last_section();
-//      void new_lwc_section();
-
+      void add_anchor_block_num( uint32_t num );
+      void send_anchor_block_num( );
+      
+   private:
+      std::set<uint32_t> blocks;
 
    };
+   //--------------- lwc_manager ---------------
    
+   void lwc_manager::add_anchor_block_num( uint32_t num ) {
+      blocks.insert( num );
+   };
+
+   void lwc_manager::send_anchor_block_num() {
+      auto lwcls_lib_num = my_impl->get_lwcls_info().lib_num;
+
+      for ( auto num : blocks ){
+         if ( num <= lwcls_lib_num ){
+            blocks.erase( num );
+         }
+      }
+
+      if ( ! blocks.empty() ) {
+         lwc_anchor_block_message msg;
+         msg.num = *blocks.begin();
+         msg.id = my_impl->chain_plug->chain().get_block_id_for_num( msg.num );
+
+         for (auto &c : my_impl->connections ) {
+            if (c->socket->is_open()) {
+               c->enqueue( msg, true);
+            }
+         }
+      }
+   }
+
+
    // eosio contract related consts and functions
 
    static const uint32_t default_expiration_delta = 30;  ///< 30 seconds
@@ -709,7 +723,7 @@ namespace eosio { namespace ibc {
 
    void ibc_contract::newsection( const new_section_params &sct ){
       auto actn = get_action( account, N(newsection), vector<permission_level>{{ account, config::active_name}}, mvo()
-         ("header",            fc::raw::pack(sct.header))
+         ("headers",           fc::raw::pack(sct.headers))
          ("blockroot_merkle",  sct.blockroot_merkle));
 
       if ( ! actn.valid() ){
@@ -1496,7 +1510,7 @@ namespace eosio { namespace ibc {
          c->lwcls_info = lwc_section_type();
          c->lwcls_info_update_time = fc::time_point();
          elog("received lwc_heartbeat_message not correct");
-         idump((msg.ls))
+         idump((msg.ls));
       }
    }
 
@@ -1519,18 +1533,115 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data &msg) {
       peer_ilog(c, "received lwc_section_data");
+
+      auto p = contract->get_table_sections_reverse_nth();
+      if ( !p.valid() ){
+         return;
+      }
+
+      auto obj = *p;
+
+      if ( msg.headers.front().block_num() > obj.last ){ // new section and push headers
+         new_section_params par;
+         par.headers = msg.headers;
+         par.blockroot_merkle = msg.blockroot_merkle;
+         contract->newsection( par );
+         return;
+      }
+
+      if ( obj.valid && msg.headers.rbegin()->block_num() <= obj.last - contract->lwc_lib_depth ){ // nothing to do
+         return;
+      }
+
+      // find the first block number, which id is same in msg and lwc chaindb.
+      uint32_t check_num_first = std::min( uint32_t(obj.last), msg.headers.rbegin()->block_num() );
+      uint32_t check_num_last = std::max( uint32_t(obj.valid ? obj.last - contract->lwc_lib_depth : obj.first)
+            , msg.headers.front().block_num() );
+      uint32_t identical_num = 0;
+      uint32_t check_num = check_num_first;
+      while ( check_num >= check_num_last ){
+         auto id_from_msg = msg.headers[ check_num - msg.headers.front().block_num()].id();
+         auto id_from_lwc = contract->get_block_id_by_block_num( check_num );
+         if ( id_from_lwc != block_id_type() && id_from_msg == id_from_lwc ){
+            identical_num = check_num;
+            break;
+         }
+         --check_num;
+      }
+      if ( identical_num == 0 ){
+         if ( check_num == obj.first ){
+            // delete lwcls
+         }
+         return;
+      }
+
+      // construct and push headers
+      std::vector<signed_block_header> headers;
+
+      auto first_itr = msg.headers.begin() + ( identical_num - msg.headers.front().block_num() );
+      auto last_itr = msg.headers.end();
+      if ( msg.headers.rbegin()->block_num() - identical_num > 50 ){ // max block header per time
+         last_itr = first_itr + 50;
+      }
+      contract->addheaders( std::vector<signed_block_header>(first_itr, last_itr) );
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_ibctrx_data &msg) {
       peer_ilog(c, "received lwc_ibctrx_data");
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const notice_lwc_block_message &msg) {
-      peer_ilog(c, "received notice_lwc_block_message");
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_anchor_block_message &msg) {
+      peer_ilog(c, "received lwc_anchor_block_message");
+
+      auto p = contract->get_table_sections_reverse_nth();
+      if ( p.valid() && msg.num > (*p).last - contract->lwc_lib_depth ){
+         // request next trunch
+         lwc_request_message msg;
+         msg.start_block_num = (*p).last;
+         msg.end_block_num = msg.start_block_num + 50;
+
+         for (auto &c : connections ) {
+            if (c->socket->is_open()) {
+               c->enqueue( msg, true);
+            }
+         }
+      }
+
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_request_message &msg) {
       peer_ilog(c, "received lwc_request_message");
+
+      // 需要增加机制得到任意num的block merkle root,暂时认为直接可以在forkdb中获取。
+
+
+      auto start_bsp = chain_plug->chain().fetch_block_state_by_number( msg.start_block_num );
+      if ( start_bsp == block_state_ptr() ){
+         ilog("didn't find block_state of number :${n}",("n",msg.start_block_num));
+         // fetch ...
+         return;
+      }
+
+      lwc_section_data sd;
+      sd.blockroot_merkle = start_bsp->blockroot_merkle;
+      sd.headers.push_back( start_bsp->header );
+
+      uint32_t pushed_num = start_bsp->header.block_num();
+
+      if ( chain_plug->chain().head_block_num() - msg.start_block_num < 60 ){
+         return;
+      }
+
+      while ( pushed_num <= msg.end_block_num && pushed_num < chain_plug->chain().head_block_num() - 50 ){
+         sd.headers.push_back( chain_plug->chain().fetch_block_state_by_number( pushed_num + 1 )->header );
+         pushed_num += 1;
+      }
+
+      for (auto &c : connections ) {
+         if (c->socket->is_open()) {
+            c->enqueue( sd, true);
+         }
+      }
    }
 
    void ibc_plugin_impl::start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection) {
@@ -1573,11 +1684,12 @@ namespace eosio { namespace ibc {
          return;
       }
 
+      // send heartbeat message
       lwc_heartbeat_message msg;
       msg.state = contract_state;
 
       if ( contract_state != deployed ){
-         auto p = my_impl->contract->get_table_sections_reverse_nth();
+         auto p = contract->get_table_sections_reverse_nth();
          if ( p.valid() ){
             auto obj = *p;
             msg.ls.first_num = obj.first;
@@ -1595,10 +1707,19 @@ namespace eosio { namespace ibc {
             c->enqueue( msg, true);
          }
       }
+
+      // get ibc transactions from ibc contract and add lwc_manager anchor block number
+
+
+
+
    }
 
    void ibc_plugin_impl::start_chain_timer() {
+      // ibc_contract_checker();
       chain_checker();
+      lwc_master->send_anchor_block_num();
+
       chain_check->expires_from_now (chain_interval);
       chain_check->async_wait ([this](boost::system::error_code ec) {
          start_chain_timer();
@@ -1609,29 +1730,88 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::chain_checker() {
-      /**
-       * 检查是否是跟上状态
-       *
-       * 实时监控bp列表是否有变化
-       * 至少每个小时同步一次数据
-       */
+      if ( !head_catched_up() ){
+         ilog("chain header doesn't catch up, wait");
+         return;
+      }
+
+      auto lwcls = get_lwcls_info();
+      if ( lwcls == lwc_section_type() ){
+         ilog("doesn't get light weight client last section infomation");
+         return;
+      }
+
+      block_header ls_last_header;
+      block_header local_safe_header;
+      try {
+         ls_last_header = *(chain_plug->chain().fetch_block_by_number( lwcls.last_num ));
+         local_safe_header = *(chain_plug->chain().fetch_block_by_number( chain_plug->chain().head_block_num() - 50 )); // 50=12*4+2
+      } catch (...) {
+         elog("fetch block by number failed");
+         return;
+      }
+
+      auto get_block_header = [=]( uint32_t num ) -> block_header {
+         return  *(chain_plug->chain().fetch_block_by_number(num));
+      };
+
+      // check if producer schedule updated
+      if ( ls_last_header.schedule_version < local_safe_header.schedule_version ){
+         // find the last header whose schedule version equal to ls_last_header's schedule version, use binary search
+         block_header search_first, search_middle, search_last;
+
+         search_first = ls_last_header;
+         search_last = local_safe_header;
+         search_middle = get_block_header( ls_last_header.block_num() + ( search_last.block_num() - ls_last_header.block_num() ) / 2 );
+
+         while( !(search_first.schedule_version == ls_last_header.schedule_version &&
+         get_block_header( search_first.block_num() + 1 ).schedule_version == ls_last_header.schedule_version + 1 ) ){
+            if ( search_middle.schedule_version != ls_last_header.schedule_version  ){
+               search_last = search_middle;
+               search_middle = get_block_header( ls_last_header.block_num() + ( search_last.block_num() - ls_last_header.block_num() ) / 2 );
+            } else {
+               search_first = search_middle;
+               search_middle = get_block_header( ls_last_header.block_num() + ( search_last.block_num() - ls_last_header.block_num() ) / 2 );
+            }
+            fc_ilog( logger, "---*---");
+         }
+
+         lwc_master->add_anchor_block_num( search_first.block_num() );
+         ilog("set anchor block number ${n}",("n",search_first.block_num()));
+         return;
+      }
+
+      // one hour
+      if ( ls_last_header.block_num() - lwcls.last_num >= 7200 ){
+         lwc_master->add_anchor_block_num( local_safe_header.block_num() );
+      }
    }
 
-
-
    lwc_section_type ibc_plugin_impl::get_lwcls_info() {
-
-
+      std::vector<lwc_section_type> sv;
       for (auto &c : connections ) {
          if ( c->lwcls_info_update_time != fc::time_point() &&
          c->lwcls_info != lwc_section_type() &&
-         fc::time_point::now() - c->lwcls_info_update_time < 30 * pow(10, 6) ){
-
+               ( fc::time_point::now() - c->lwcls_info_update_time < fc::seconds(30)) ){
+            sv.push_back( c->lwcls_info );
          }
-
       }
 
+      if( sv.empty() ){
+         return lwc_section_type();
+      }
 
+      std::sort( sv.begin(), sv.end(), []( lwc_section_type s1, lwc_section_type s2 ){
+         return s1.first_num < s2.first_num ;
+      } );
+
+      return sv[ sv.size() / 2 + 1 ];
+   }
+
+   bool ibc_plugin_impl::head_catched_up() {
+      auto head_block_time_point = fc::time_point( chain_plug->chain().fork_db_head_block_time() );
+      return head_block_time_point < fc::time_point::now() + fc::seconds(3) &&
+             head_block_time_point > fc::time_point::now() - fc::seconds(5);
    }
 
    void ibc_plugin_impl::ticker() {
