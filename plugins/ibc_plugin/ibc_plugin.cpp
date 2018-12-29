@@ -58,7 +58,7 @@ namespace eosio { namespace ibc {
 
    class lwc_manager;
    class dispatch_manager;
-   class ibc_contract;
+   class ibc_chain_contract;
 
    using connection_ptr = std::shared_ptr<connection>;
    using connection_wptr = std::weak_ptr<connection>;
@@ -93,15 +93,15 @@ namespace eosio { namespace ibc {
       bool                             done = false;
       unique_ptr< lwc_manager >        lwc_master;
       unique_ptr< dispatch_manager >   dispatcher;
-      unique_ptr< ibc_contract >       contract;
-      ibc_contract_state               contract_state = none;
+      unique_ptr< ibc_chain_contract >       chain_contract;
+      ibc_chain_contract_state               contract_state = none;
 
       unique_ptr<boost::asio::steady_timer> connector_check;
-      unique_ptr<boost::asio::steady_timer> ibc_contract_check;
+      unique_ptr<boost::asio::steady_timer> ibc_chain_contract_check;
       unique_ptr<boost::asio::steady_timer> chain_check;
       unique_ptr<boost::asio::steady_timer> keepalive_timer;
       boost::asio::steady_timer::duration   connector_period;
-      boost::asio::steady_timer::duration   ibc_contract_interval{std::chrono::seconds{5}};
+      boost::asio::steady_timer::duration   ibc_chain_contract_interval{std::chrono::seconds{5}};
       boost::asio::steady_timer::duration   chain_interval{std::chrono::seconds{5}};
       boost::asio::steady_timer::duration   keepalive_interval{std::chrono::seconds{5}};
       int                           max_cleanup_time_ms = 0;
@@ -164,7 +164,7 @@ namespace eosio { namespace ibc {
 
 
       void start_conn_timer( boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection );
-      void start_ibc_contract_timer( );
+      void start_ibc_chain_contract_timer( );
       void start_chain_timer( );
       void start_monitors( );
 
@@ -176,7 +176,7 @@ namespace eosio { namespace ibc {
        */
       void ticker();
       void chain_checker();
-      void ibc_contract_checker();
+      void ibc_chain_contract_checker();
       bool authenticate_peer(const handshake_message& msg) const;
 
       /** Retrieve public key used to authenticate with peers.
@@ -447,7 +447,7 @@ namespace eosio { namespace ibc {
    static const uint32_t  max_lwc_lib_depth = 200;
 
 
-   optional<key_value_object>  get_table_reverse_nth_row_obj( const name& code, const name& scope, const name& table, const uint64_t nth = 0 ) {
+   optional<key_value_object>  get_table_nth_row_kvo_by_primary_key( const name& code, const name& scope, const name& table, const uint64_t nth = 0, bool reverse = false ) {
       const auto& d = app().get_plugin<chain_plugin>().chain().db();
       const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(code, scope, table));
       if (t_id != nullptr) {
@@ -460,26 +460,55 @@ namespace eosio { namespace ibc {
             return optional<key_value_object>();
          }
 
-         --upper;
-
-         int i = nth;
-         auto itr = upper;
-         for (; itr != lower && i >= 0; --itr) {
-            if (i == 0) {
-               const key_value_object &obj = *itr;
-               return obj;
+         if ( reverse ){
+            int i = nth;
+            auto itr = --upper;
+            for (; itr != lower && i >= 0; --itr ){
+               if (i == 0) {
+                  const key_value_object &obj = *itr;
+                  return obj;
+               }
+               --i;
             }
-            --i;
-         }
 
-         if ( i == 0 && itr == lower ){
-            return *lower;
+            if ( i == 0 && itr == lower ){
+               return *lower;
+            }
+         } else {
+            int i = nth;
+            auto itr = lower;
+            for (; itr != upper && i >= 0; ++itr ){
+               if (i == 0) {
+                  const key_value_object &obj = *itr;
+                  return obj;
+               }
+               --i;
+            }
          }
       }
       return optional<key_value_object>();
    }
 
-   optional<key_value_object>  get_singleton( const name& code, const name& scope, const name& table ) {
+   std::tuple<uint64_t,uint64_t>  get_table_primary_key_range( const name& code, const name& scope, const name& table ) {
+      const auto& d = app().get_plugin<chain_plugin>().chain().db();
+      const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(code, scope, table));
+      if (t_id != nullptr) {
+         const auto &idx = d.get_index<chain::key_value_index, chain::by_scope_primary>();
+         decltype(t_id->id) next_tid(t_id->id._id + 1);
+         auto lower = idx.lower_bound(boost::make_tuple(t_id->id));
+         auto upper = idx.lower_bound(boost::make_tuple(next_tid));
+
+         if ( lower != upper ){
+            const key_value_object& first = *lower;
+            const key_value_object& last = *(--upper);
+            return std::make_tuple{ first.primary_key, last.primary_key };
+         }
+      }
+      return std::make_tuple{ 0, 0 };
+   }
+
+   
+   optional<key_value_object>  get_singleton_kvo( const name& code, const name& scope, const name& table ) {
       const auto &d = app().get_plugin<chain_plugin>().chain().db();
       const auto *t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(
          boost::make_tuple(code, scope, table));
@@ -498,7 +527,6 @@ namespace eosio { namespace ibc {
    }
 
 
-   
    void set_transaction_headers( transaction& trx, uint32_t expiration = default_expiration_delta, uint32_t delay_sec = 0 ) {
       trx.expiration = my_impl->chain_plug->chain().head_block_time() + fc::seconds(expiration);
       trx.set_reference_block( my_impl->chain_plug->chain().last_irreversible_block_id() );
@@ -556,10 +584,11 @@ namespace eosio { namespace ibc {
       push_transaction( trx );
    }
 
+   // --------------- ibc_chain_contract ---------------
 
-   class ibc_contract {
+   class ibc_chain_contract {
    public:
-      ibc_contract(  name contract );
+      ibc_chain_contract(  name contract ):account(contract){}
 
       // actions
       void chain_init( const lwc_init_message &msg );
@@ -570,7 +599,9 @@ namespace eosio { namespace ibc {
       optional<section_type> get_table_sections_reverse_nth( uint64_t nth = 0 );
       optional<block_header_state_type> get_table_chaindb_by_block_num( uint64_t num );
       block_id_type get_block_id_by_block_num( uint64_t num );
-      optional<global_state> get_global_singleton();
+
+      // singletons
+      optional<global_state_ibc_chain> get_global_singleton();
 
       // others
       void get_basic_info();
@@ -586,13 +617,7 @@ namespace eosio { namespace ibc {
       name account;
    };
 
-   //--------------- ibc_contract ---------------
-
-   ibc_contract::ibc_contract( name contract ){
-      account = contract;
-   }
-
-   bool ibc_contract::has_contract(){
+   bool ibc_chain_contract::has_contract(){
       auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
       eosio::chain_apis::read_only::get_code_hash_params params{account};
       try {
@@ -604,7 +629,7 @@ namespace eosio { namespace ibc {
       return false;
    }
 
-   bool ibc_contract::initialized(){
+   bool ibc_chain_contract::initialized(){
       auto ret = get_table_sections_reverse_nth();
       if ( ret.valid() ){
          return true;
@@ -613,8 +638,8 @@ namespace eosio { namespace ibc {
    }
 
    
-   void ibc_contract::get_basic_info(){
-      ibc_contract_state state = none;
+   void ibc_chain_contract::get_basic_info(){
+      ibc_chain_contract_state state = none;
       if ( has_contract() ){
          state = deployed;
          if ( initialized() ){
@@ -623,7 +648,7 @@ namespace eosio { namespace ibc {
       }
       my_impl->contract_state = state;
 
-      global_state gstate;
+      global_state_ibc_chain gstate;
       auto sp = get_global_singleton();
       if ( sp.valid() ) {
          gstate = *sp;
@@ -631,15 +656,15 @@ namespace eosio { namespace ibc {
       }
    }
 
-   bool ibc_contract::lib_depth_valid(){
+   bool ibc_chain_contract::lib_depth_valid(){
       if ( lwc_lib_depth >= min_lwc_lib_depth && lwc_lib_depth <= max_lwc_lib_depth ){
          return true;
       }
       return false;
    }
 
-   optional<section_type> ibc_contract::get_table_sections_reverse_nth( uint64_t nth ){
-      auto p = get_table_reverse_nth_row_obj( account, account, N(sections), nth );
+   optional<section_type> ibc_chain_contract::get_table_sections_reverse_nth( uint64_t nth ){
+      auto p = get_table_nth_row_kvo_by_primary_key( account, account, N(sections), nth, true );
       if ( p.valid() ){
          auto obj = *p;
          fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
@@ -650,7 +675,7 @@ namespace eosio { namespace ibc {
       return optional<section_type>();
    }
 
-   optional<block_header_state_type> ibc_contract::get_table_chaindb_by_block_num( uint64_t num ){
+   optional<block_header_state_type> ibc_chain_contract::get_table_chaindb_by_block_num( uint64_t num ){
       chain_apis::read_only::get_table_rows_params par;
       par.json = true;  // must be true
       par.code = account;
@@ -672,7 +697,7 @@ namespace eosio { namespace ibc {
       return optional<block_header_state_type>();
    }
 
-   block_id_type ibc_contract::get_block_id_by_block_num( uint64_t num ){
+   block_id_type ibc_chain_contract::get_block_id_by_block_num( uint64_t num ){
       auto p = get_table_chaindb_by_block_num( num );
       if ( p.valid() ){
          return p->block_id;
@@ -680,20 +705,20 @@ namespace eosio { namespace ibc {
       return block_id_type();
    }
 
-   optional<global_state> ibc_contract::get_global_singleton(){
-      auto p = get_singleton( account, account, N(global) );
+   optional<global_state_ibc_chain> ibc_chain_contract::get_global_singleton(){
+      auto p = get_singleton_kvo( account, account, N(global) );
       if ( p.valid() ){
          auto obj = *p;
          fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
-         global_state result;
+         global_state_ibc_chain result;
          fc::raw::unpack( ds, result );
          return result;
       }
-      return optional<global_state>();
+      return optional<global_state_ibc_chain>();
    }
 
 
-   void ibc_contract::chain_init( const lwc_init_message &msg ){
+   void ibc_chain_contract::chain_init( const lwc_init_message &msg ){
       auto actn = get_action( account, N(chaininit), vector<permission_level>{{ account, config::active_name}}, mvo()
       ("header",            fc::raw::pack(msg.header))
       ("active_schedule",   msg.active_schedule)
@@ -707,7 +732,7 @@ namespace eosio { namespace ibc {
       push_action( *actn );
    }
 
-   void ibc_contract::newsection( const new_section_params &sct ){
+   void ibc_chain_contract::newsection( const new_section_params &sct ){
       auto actn = get_action( account, N(newsection), vector<permission_level>{{ account, config::active_name}}, mvo()
          ("header",            fc::raw::pack(sct.header))
          ("blockroot_merkle",  sct.blockroot_merkle));
@@ -720,7 +745,7 @@ namespace eosio { namespace ibc {
       push_action( *actn );
    }
 
-   void ibc_contract::addheaders( const std::vector<signed_block_header> headers ){
+   void ibc_chain_contract::addheaders( const std::vector<signed_block_header> headers ){
       auto actn = get_action( account, N(addheaders), vector<permission_level>{{ account, config::active_name}}, mvo()
          ("headers",            fc::raw::pack(headers)));
 
@@ -732,14 +757,170 @@ namespace eosio { namespace ibc {
       push_action( *actn );
    }
 
+   // --------------- ibc_token_contract ---------------
+
+   class ibc_token_contract {
+   public:
+      ibc_token_contract( name contract ):account(contract){}
+
+      // actions
+      void cash( const cash_action_params& p );
+      void cashconfirm( const cashconfirm_action_params& p );
+
+      // tables
+      std::tuple<uint64_t,uint64_t> get_table_origtrxs_id_range();
+      optional<original_trx_info> get_table_origtrxs_by_id( uint64_t id );
+      std::tuple<uint64_t,uint64_t> get_table_cashtrxs_seq_num_range();
+      optional<cash_trx_info> get_table_cashtrxs_by_seq_num( uint64_t seq_num );
+
+      // singletons
+      optional<global_state_ibc_token> get_global_state_singleton();
+      optional<global_mutable_ibc_token> get_global_mutable_singleton();
+
+      // others
+
+   private:
+      bool has_contract();
+      bool initialized();
+
+      name account;
+   };
 
 
+   bool ibc_token_contract::has_contract(){
+      auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
+      eosio::chain_apis::read_only::get_code_hash_params params{account};
+      try {
+         auto result = ro_api.get_code_hash( params );
+         if ( result.code_hash != fc::sha256() ){
+            return true;
+         }
+      } catch (...){}
+      return false;
+   }
+
+   bool ibc_token_contract::initialized(){
+      return true;
+   }
+
+   std::tuple<uint64_t,uint64_t> ibc_token_contract::get_table_origtrxs_id_range() {
+      return get_table_primary_key_range( account, account, N(origtrxs) );
+   }
+
+   optional<original_trx_info> ibc_token_contract::get_table_origtrxs_by_id( uint64_t id ) {
+      chain_apis::read_only::get_table_rows_params par;
+      par.json = true;  // must be true
+      par.code = account;
+      par.scope = account.to_string();
+      par.table = N(origtrxs);
+      par.table_key = "id";
+      par.lower_bound = to_string(id);
+      par.upper_bound = to_string(id + 1);
+      par.limit = 1;
+      par.key_type = "i64";
+      par.index_position = "1";
+
+      try {
+         auto result = my_impl->chain_plug->get_read_only_api().get_table_rows( par );
+         if ( result.rows.size() != 0 ){
+            return result.rows.front().as<original_trx_info>();
+         }
+      } FC_LOG_AND_DROP()
+      return optional<original_trx_info>();
+   }
+
+   std::tuple<uint64_t,uint64_t> ibc_token_contract::get_table_cashtrxs_seq_num_range() {
+      return get_table_primary_key_range( account, account, N(cashtrxs) );
+   }
+
+   optional<cash_trx_info> ibc_token_contract::get_table_cashtrxs_by_seq_num( uint64_t seq_num ) {
+      chain_apis::read_only::get_table_rows_params par;
+      par.json = true;  // must be true
+      par.code = account;
+      par.scope = account.to_string();
+      par.table = N(cashtrxs);
+      par.table_key = "seq_num";
+      par.lower_bound = to_string(seq_num);
+      par.upper_bound = to_string(seq_num + 1);
+      par.limit = 1;
+      par.key_type = "i64";
+      par.index_position = "1";
+
+      try {
+         auto result = my_impl->chain_plug->get_read_only_api().get_table_rows( par );
+         if ( result.rows.size() != 0 ){
+            return result.rows.front().as<cash_trx_info>();
+         }
+      } FC_LOG_AND_DROP()
+      return optional<cash_trx_info>();
+   }
+
+   // singletons
+   optional<global_state_ibc_token> ibc_token_contract::get_global_state_singleton() {
+      auto p = get_singleton_kvo( account, account, N(globals) );
+      if ( p.valid() ){
+         auto obj = *p;
+         fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
+         global_state_ibc_token result;
+         fc::raw::unpack( ds, result );
+         return result;
+      }
+      return optional<global_state_ibc_token>();
+   }
+
+   optional<global_mutable_ibc_token> ibc_token_contract::get_global_mutable_singleton() {
+      auto p = get_singleton_kvo( account, account, N(globalm) );
+      if ( p.valid() ){
+         auto obj = *p;
+         fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
+         global_mutable_ibc_token result;
+         fc::raw::unpack( ds, result );
+         return result;
+      }
+      return optional<global_mutable_ibc_token>();
+   }
+
+   void ibc_token_contract::cash( const cash_action_params& p ){
+      auto actn = get_action( account, N(cash), vector<permission_level>{{ account, config::active_name}}, mvo()
+         ("seq_num",                      p.seq_num)
+         ("orig_trx_block_num",           p.orig_trx_block_num)
+         ("orig_trx_packed_trx_receipt",  p.orig_trx_packed_trx_receipt)
+         ("orig_trx_merkle_path",         p.orig_trx_merkle_path)
+         ("orig_trx_id",                  p.orig_trx_id)
+         ("to",                           p.to)
+         ("quantity",                     p.quantity)
+         ("memo",                         p.memo)
+         ("relay",                        p.relay));
+
+      if ( ! actn.valid() ){
+         elog("cash: get action failed");
+         return;
+      }
+
+      push_action( *actn );
+   }
+
+   void ibc_token_contract::cashconfirm( const cashconfirm_action_params& p ){
+      auto actn = get_action( account, N(cashconfirm), vector<permission_level>{{ account, config::active_name}}, mvo()
+         ("cash_trx_block_num",          p.cash_trx_block_num)
+         ("cash_trx_packed_trx_receipt", p.cash_trx_packed_trx_receipt)
+         ("cash_trx_merkle_path",        p.cash_trx_merkle_path)
+         ("cash_trx_id",                 p.cash_trx_id)
+         ("orig_trx_id",                 p.orig_trx_id));
+
+      if ( ! actn.valid() ){
+         elog("cash: get action failed");
+         return;
+      }
+
+      push_action( *actn );
+   }
 
 
 
 
    void test(){
-      ibc_contract ct(N(eos222333ibc));
+      ibc_chain_contract ct(N(eos222333ibc));
 
       auto r = ct.get_table_chaindb_by_block_num(22960);
 
@@ -1511,9 +1692,9 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_init_message &msg) {
       peer_ilog(c, "received lwc_init_message");
 
-      contract->get_basic_info();
-      if ( contract_state == deployed && contract->lib_depth_valid() ){
-         contract->chain_init( msg );
+      chain_contract->get_basic_info();
+      if ( contract_state == deployed && chain_contract->lib_depth_valid() ){
+         chain_contract->chain_init( msg );
       }
    }
 
@@ -1546,30 +1727,30 @@ namespace eosio { namespace ibc {
       });
    }
 
-   void ibc_plugin_impl::start_ibc_contract_timer() {
-      ibc_contract_checker();
-      ibc_contract_check->expires_from_now (ibc_contract_interval);
-      ibc_contract_check->async_wait ([this](boost::system::error_code ec) {
-         start_ibc_contract_timer();
+   void ibc_plugin_impl::start_ibc_chain_contract_timer() {
+      ibc_chain_contract_checker();
+      ibc_chain_contract_check->expires_from_now (ibc_chain_contract_interval);
+      ibc_chain_contract_check->async_wait ([this](boost::system::error_code ec) {
+         start_ibc_chain_contract_timer();
          if (ec) {
-            wlog ("start_ibc_contract_timer error: ${m}", ("m", ec.message()));
+            wlog ("start_ibc_chain_contract_timer error: ${m}", ("m", ec.message()));
          }
       });
    }
 
-   void ibc_plugin_impl::ibc_contract_checker() {
+   void ibc_plugin_impl::ibc_chain_contract_checker() {
 
       ilog("++++++++++++========");test();return;
 
       if ( contract_state == none ){
          wlog("ibc contract does not exist");
-         contract->get_basic_info();
+         chain_contract->get_basic_info();
          return;
       }
 
-      if ( !contract->lib_depth_valid() ){
+      if ( !chain_contract->lib_depth_valid() ){
          wlog("ibc contract global singleton config lib_depth not valid");
-         contract->get_basic_info();
+         chain_contract->get_basic_info();
          return;
       }
 
@@ -1577,15 +1758,15 @@ namespace eosio { namespace ibc {
       msg.state = contract_state;
 
       if ( contract_state != deployed ){
-         auto p = my_impl->contract->get_table_sections_reverse_nth();
+         auto p = my_impl->chain_contract->get_table_sections_reverse_nth();
          if ( p.valid() ){
             auto obj = *p;
             msg.ls.first_num = obj.first;
-            msg.ls.first_id = contract->get_block_id_by_block_num( msg.ls.first_num );
+            msg.ls.first_id = chain_contract->get_block_id_by_block_num( msg.ls.first_num );
             msg.ls.last_num = obj.last;
-            msg.ls.last_id = contract->get_block_id_by_block_num( msg.ls.last_num );
-            msg.ls.lib_num = std::max( obj.last - contract->lwc_lib_depth, obj.first );
-            msg.ls.lib_id = contract->get_block_id_by_block_num( msg.ls.lib_num );
+            msg.ls.last_id = chain_contract->get_block_id_by_block_num( msg.ls.last_num );
+            msg.ls.lib_num = std::max( obj.last - chain_contract->lwc_lib_depth, obj.first );
+            msg.ls.lib_id = chain_contract->get_block_id_by_block_num( msg.ls.lib_num );
             msg.ls.valid = obj.valid;
          }
       }
@@ -1651,11 +1832,11 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::start_monitors() {
       connector_check.reset(new boost::asio::steady_timer( app().get_io_service()));
-      ibc_contract_check.reset(new boost::asio::steady_timer( app().get_io_service()));
+      ibc_chain_contract_check.reset(new boost::asio::steady_timer( app().get_io_service()));
       chain_check.reset(new boost::asio::steady_timer( app().get_io_service()));
 
       start_conn_timer(connector_period, std::weak_ptr<connection>());
-      start_ibc_contract_timer();
+      start_ibc_chain_contract_timer();
       start_chain_timer();
    }
 
@@ -1875,7 +2056,7 @@ namespace eosio { namespace ibc {
          ( "ibc-max-cleanup-time-msec", bpo::value<int>()->default_value(10), "max connection cleanup time per cleanup call in millisec")
          ( "ibc-version-match", bpo::value<bool>()->default_value(false), "True to require exact match of ibc plugin version.")
          ( "ibc-sidechain-id", bpo::value<string>(), "the sidechain's chain id")
-         ( "ibc-contract", bpo::value<string>(), "the name of this chain's ibc contract")
+         ( "ibc-chain-contract", bpo::value<string>(), "the name of this chain's ibc chain contract")
          ( "ibc-log-format", bpo::value<string>()->default_value( "[\"${_name}\" ${_ip}:${_port}]" ),
            "The string used to format peers when logging messages about them.  Variables are escaped with ${<variable name>}.\n"
            "Available Variables:\n"
@@ -1909,10 +2090,10 @@ namespace eosio { namespace ibc {
          my->sidechain_id = fc::sha256( options.at( "ibc-sidechain-id" ).as<string>() );
          ilog( "ibc sidechain id is ${id}", ("id",  my->sidechain_id.str()));
 
-         EOS_ASSERT( options.count( "ibc-contract" ) && options.at("ibc-contract").as<string>() != string(),
-            chain::plugin_config_exception, "ibc-contract not specified" );
-         my->contract.reset( new ibc_contract( eosio::chain::name{ options.at("ibc-contract").as<string>()}));
-         ilog( "ibc contract account is ${name}", ("name",  options.at("ibc-contract").as<string>()));
+         EOS_ASSERT( options.count( "ibc-chain-contract" ) && options.at("ibc-chain-contract").as<string>() != string(),
+            chain::plugin_config_exception, "ibc-chain-contract not specified" );
+         my->chain_contract.reset( new ibc_chain_contract( eosio::chain::name{ options.at("ibc-chain-contract").as<string>()}));
+         ilog( "ibc chain contract account is ${name}", ("name",  options.at("ibc-chain-contract").as<string>()));
 
          my->connector_period = std::chrono::seconds( options.at( "ibc-connection-cleanup-period" ).as<int>());
          my->max_cleanup_time_ms = options.at("ibc-max-cleanup-time-msec").as<int>();
@@ -2038,7 +2219,7 @@ namespace eosio { namespace ibc {
       chain::controller&cc = my->chain_plug->chain();
       cc.irreversible_block.connect( boost::bind(&ibc_plugin_impl::irreversible_block, my.get(), _1));
 
-      my->contract->get_basic_info();
+      my->chain_contract->get_basic_info();
       my->start_monitors();
 
       for( auto seed_node : my->supplied_peers ) {

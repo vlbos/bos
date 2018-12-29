@@ -43,9 +43,8 @@ namespace eosio { namespace ibc {
 
 
 
-   // ---- ibc contract table structs ----
-
-   struct global_state {
+   // ---- ibc.chain contract table related structs ----
+   struct global_state_ibc_chain {
       uint32_t    lib_depth;
    };
 
@@ -70,21 +69,100 @@ namespace eosio { namespace ibc {
       public_key_type            block_signing_key;
    };
 
-   //  ---- ibc contract push action related structs ----
+   // ---- ibc.chain contract action related structs ----
    struct new_section_params {
       signed_block_header  header;
       incremental_merkle   blockroot_merkle;
    };
 
+   // ---- ibc.token contract table related structs ----
+   struct transfer_action_type {
+      name    from;
+      name    to;
+      asset   quantity;
+      string  memo;
+   };
+
+   struct transfer_action_info {
+      name    contract;
+      name    action; // one of "transfer"_n "withdraw"_n "cash"_n
+      name    from;
+      asset   quantity;
+   };
+
+   struct global_state_ibc_token {
+      name              ibc_contract;
+      name              peerchain_ibc_token_contract;
+      uint32_t          max_origtrxs_table_records;
+      uint32_t          cache_cashtrxs_table_records;
+      uint32_t          max_original_trxs_per_block;
+      bool              active;
+      uint32_t          lock_start_time;
+      uint32_t          lock_minutes;
+   };
+
+   struct global_mutable_ibc_token {
+      uint64_t    cash_seq_num;
+      uint32_t    last_finished_trx_block_time_slot;
+      uint32_t    current_block_time_slot;
+      uint32_t    current_block_trxs;
+   };
+
+   struct original_trx_info {
+      uint64_t                id; // auto-increment
+      uint32_t                block_time_slot; // new record must not decrease time slot
+      transaction_id_type     trx_id;
+      transfer_action_info    action; // very important infomation, used when execute rollback
+   };
+
+   struct cash_trx_info {
+      uint64_t              seq_num; // set by seq_num in cash action, and must be increase one by one, and start from zero
+      uint32_t              block_time_slot;
+      transaction_id_type   trx_id;
+      transfer_action_type  action;
+      transaction_id_type   orig_trx_id;
+      uint64_t              orig_trx_block_num;
+   };
+
+   // ---- ibc.token contract action related structs ----
+   struct cash_action_params {
+      uint64_t                               seq_num;
+      uint32_t                               orig_trx_block_num;
+      std::vector<char>&                     orig_trx_packed_trx_receipt;
+      std::vector<digest_type>&              orig_trx_merkle_path;
+      transaction_id_type                    orig_trx_id;    // redundant, facilitate indexing and checking
+      name                                   to;             // redundant, facilitate indexing and checking
+      asset                                  quantity;       // redundant, facilitate indexing and checking
+      string                                 memo;
+      name                                   relay;
+   };
+
+   struct cashconfirm_action_params {
+      uint32_t                               cash_trx_block_num;
+      std::vector<char>&                     cash_trx_packed_trx_receipt;
+      std::vector<digest_type>&              cash_trx_merkle_path;
+      transaction_id_type                    cash_trx_id;   // redundant, facilitate indexing and checking
+      transaction_id_type                    orig_trx_id;
+   };
+
+
 }}
 
 //FC_REFLECT( eosio::connection_status, (peer)(connecting)(syncing)(last_handshake) )
 
-FC_REFLECT( eosio::ibc::global_state, (lib_depth) )
+FC_REFLECT( eosio::ibc::global_state_ibc_chain, (lib_depth) )
 FC_REFLECT( eosio::ibc::section_type, (first)(last)(np_num)(valid)(producers)(block_nums) )
 FC_REFLECT( eosio::ibc::new_section_params, (header)(blockroot_merkle) )
 FC_REFLECT( eosio::ibc::block_header_state_type, (block_num)(block_id)(header)(active_schedule_id)(pending_schedule_id)(blockroot_merkle)(block_signing_key) )
 
+FC_REFLECT( eosio::ibc::transfer_action_type, (from)(to)(quantity)(memo) )
+FC_REFLECT( eosio::ibc::transfer_action_info, (contract)(action)(from)(quantity) )
+FC_REFLECT( eosio::ibc::global_state_ibc_token, (ibc_contract)(peerchain_ibc_token_contract)(max_origtrxs_table_records)(cache_cashtrxs_table_records)(max_original_trxs_per_block)(active)(lock_start_time)(lock_minutes) )
+FC_REFLECT( eosio::ibc::global_mutable_ibc_token, (cash_seq_num)(last_finished_trx_block_time_slot)(current_block_time_slot)(current_block_trxs) )
+FC_REFLECT( eosio::ibc::original_trx_info, (id)(block_time_slot)(trx_id)(action) )
+FC_REFLECT( eosio::ibc::cash_trx_info, (seq_num)(block_time_slot)(trx_id)(action)(orig_trx_id)(orig_trx_block_num) )
+FC_REFLECT( eosio::ibc::cash_action_params, (seq_num)(orig_trx_block_num)(orig_trx_packed_trx_receipt)(orig_trx_merkle_path)(orig_trx_id)(to)(quantity)(memo)(relay) )
+FC_REFLECT( eosio::ibc::cashconfirm_action_params, (cash_trx_block_num)(cash_trx_packed_trx_receipt)(cash_trx_merkle_path)(cash_trx_id)(orig_trx_id) )
 
 
 
