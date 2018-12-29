@@ -153,14 +153,14 @@ namespace eosio { namespace ibc {
        */
       void handle_message( connection_ptr c, const time_message &msg);
 
-      void handle_message( connection_ptr c, const lwc_heartbeat_message &msg);
+      void handle_message( connection_ptr c, const ibc_heartbeat_message &msg);
       void handle_message( connection_ptr c, const request_lwcls_message &msg);
       void handle_message( connection_ptr c, const lwcls_detail_message &msg);
       void handle_message( connection_ptr c, const lwc_init_message &msg);
-      void handle_message( connection_ptr c, const lwc_section_data &msg);
+      void handle_message( connection_ptr c, const lwc_section_data_message &msg);
       void handle_message( connection_ptr c, const lwc_ibctrx_data &msg);
       void handle_message( connection_ptr c, const lwc_anchor_block_message &msg);
-      void handle_message( connection_ptr c, const lwc_request_message &msg);
+      void handle_message( connection_ptr c, const lwc_section_request_message &msg);
 
 
       void start_conn_timer( boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection );
@@ -1643,8 +1643,8 @@ namespace eosio { namespace ibc {
       c->rec = 0;
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_heartbeat_message &msg) {
-      peer_ilog(c, "received lwc_heartbeat_message");
+   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg) {
+      peer_ilog(c, "received ibc_heartbeat_message");
 
       if ( msg.state == deployed ) {
          // send lwc_init_message
@@ -1693,7 +1693,7 @@ namespace eosio { namespace ibc {
       } else {
          c->lwcls_info = lwc_section_type();
          c->lwcls_info_update_time = fc::time_point();
-         elog("received lwc_heartbeat_message not correct");
+         elog("received ibc_heartbeat_message not correct");
          idump((msg.ls));
       }
    }
@@ -1715,8 +1715,8 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data &msg) {
-      peer_ilog(c, "received lwc_section_data");
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data_message &msg) {
+      peer_ilog(c, "received lwc_section_data_message");
 
       auto p = contract->get_table_sections_reverse_nth();
       if ( !p.valid() ){
@@ -1780,7 +1780,7 @@ namespace eosio { namespace ibc {
       auto p = contract->get_table_sections_reverse_nth();
       if ( p.valid() && msg.num > (*p).last - contract->lwc_lib_depth ){
          // request next trunch
-         lwc_request_message msg;
+         lwc_section_request_message msg;
          msg.start_block_num = (*p).last;
          msg.end_block_num = msg.start_block_num + 50;
 
@@ -1793,8 +1793,8 @@ namespace eosio { namespace ibc {
 
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_request_message &msg) {
-      peer_ilog(c, "received lwc_request_message");
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_request_message &msg) {
+      peer_ilog(c, "received lwc_section_request_message");
 
       // 需要增加机制得到任意num的block merkle root,暂时认为直接可以在forkdb中获取。
 
@@ -1806,7 +1806,7 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      lwc_section_data sd;
+      lwc_section_data_message sd;
       sd.blockroot_merkle = start_bsp->blockroot_merkle;
       sd.headers.push_back( start_bsp->header );
 
@@ -1869,7 +1869,7 @@ namespace eosio { namespace ibc {
       }
 
       // send heartbeat message
-      lwc_heartbeat_message msg;
+      ibc_heartbeat_message msg;
       msg.state = contract_state;
 
       if ( contract_state != deployed ){
