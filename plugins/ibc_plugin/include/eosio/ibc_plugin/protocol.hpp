@@ -113,6 +113,15 @@ namespace eosio {
          block_id_type  last_id;
          block_id_type  lib_id;
          bool           valid;
+
+         bool operator == ( lwc_section_type b ){
+            return first_num == b.first_num && last_num == b.last_num && lib_num == b.lib_num
+                   && first_id == b.first_id && last_id == b.last_id && lib_id == b.lib_id && valid == b.valid;
+         }
+
+         bool operator != ( lwc_section_type b ){
+            return !( *this == b );
+         }
       };
 
       /**
@@ -171,8 +180,8 @@ namespace eosio {
        *
        * when recieve this message the peer chain's ibc plugin will send "lwc_request_message"
        */
-      struct notice_lwc_block_message {
-         notice_lwc_block_message():num(0),id(){}
+      struct lwc_anchor_block_message {
+         lwc_anchor_block_message():num(0),id(){}
          uint32_t       num;
          block_id_type  id;
       };
@@ -192,7 +201,7 @@ namespace eosio {
                                           lwc_init_message,
                                           lwc_section_data,
                                           lwc_ibctrx_data,
-                                          notice_lwc_block_message,
+                                          lwc_anchor_block_message,
                                           lwc_request_message >;
 
    } // namespace ibc
@@ -216,5 +225,5 @@ FC_REFLECT( eosio::ibc::lwcls_detail_message, (ls)(ids) )
 FC_REFLECT( eosio::ibc::lwc_init_message, (header)(active_schedule)(blockroot_merkle)  )
 FC_REFLECT( eosio::ibc::lwc_section_data, (headers)(blockroot_merkle)  )
 FC_REFLECT( eosio::ibc::lwc_ibctrx_data, (block_id)(trx)(merkle_path)  )
-FC_REFLECT( eosio::ibc::notice_lwc_block_message, (num)(id) )
+FC_REFLECT( eosio::ibc::lwc_anchor_block_message, (num)(id) )
 FC_REFLECT( eosio::ibc::lwc_request_message, (start_block_num)(end_block_num) )
