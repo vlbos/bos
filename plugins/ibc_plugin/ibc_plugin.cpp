@@ -55,16 +55,12 @@ namespace eosio { namespace ibc {
    namespace bip = boost::interprocess;
 
    class connection;
-
-   class lwc_manager;
-   class dispatch_manager;
    class ibc_chain_contract;
-
+   class ibc_token_contract;
+   
    using connection_ptr = std::shared_ptr<connection>;
    using connection_wptr = std::weak_ptr<connection>;
-
    using socket_ptr = std::shared_ptr<tcp::socket>;
-
    using ibc_message_ptr = shared_ptr<ibc_message>;
    
    class ibc_plugin_impl {
@@ -91,21 +87,20 @@ namespace eosio { namespace ibc {
 
       std::set< connection_ptr >       connections;
       bool                             done = false;
-      unique_ptr< lwc_manager >        lwc_master;
-      unique_ptr< dispatch_manager >   dispatcher;
+
       unique_ptr< ibc_chain_contract >       chain_contract;
-      ibc_chain_contract_state               contract_state = none;
+      unique_ptr< ibc_token_contract >       token_contract;
+      
+      unique_ptr<boost::asio::steady_timer>  connector_check;
+      boost::asio::steady_timer::duration    connector_period;
+      int                                    max_cleanup_time_ms = 0;
 
-      unique_ptr<boost::asio::steady_timer> connector_check;
-      unique_ptr<boost::asio::steady_timer> ibc_chain_contract_check;
-      unique_ptr<boost::asio::steady_timer> chain_check;
-      unique_ptr<boost::asio::steady_timer> keepalive_timer;
-      boost::asio::steady_timer::duration   connector_period;
-      boost::asio::steady_timer::duration   ibc_chain_contract_interval{std::chrono::seconds{5}};
-      boost::asio::steady_timer::duration   chain_interval{std::chrono::seconds{5}};
-      boost::asio::steady_timer::duration   keepalive_interval{std::chrono::seconds{5}};
-      int                           max_cleanup_time_ms = 0;
+      unique_ptr<boost::asio::steady_timer>  keepalive_timer;
+      boost::asio::steady_timer::duration    keepalive_interval{std::chrono::seconds{5}};
 
+      unique_ptr<boost::asio::steady_timer>  ibc_heartbeat_timer;
+      boost::asio::steady_timer::duration    ibc_heartbeat_interval{std::chrono::seconds{3}};
+      
       const std::chrono::system_clock::duration peer_authentication_interval{std::chrono::seconds{1}}; ///< Peer clock may be no more than 1 second skewed from our clock, including network latency.
 
       bool                          network_version_match = false;
@@ -154,18 +149,14 @@ namespace eosio { namespace ibc {
       void handle_message( connection_ptr c, const time_message &msg);
 
       void handle_message( connection_ptr c, const ibc_heartbeat_message &msg);
-      void handle_message( connection_ptr c, const request_lwcls_message &msg);
-      void handle_message( connection_ptr c, const lwcls_detail_message &msg);
       void handle_message( connection_ptr c, const lwc_init_message &msg);
-      void handle_message( connection_ptr c, const lwc_section_data_message &msg);
-      void handle_message( connection_ptr c, const lwc_ibctrx_data &msg);
-      void handle_message( connection_ptr c, const lwc_anchor_block_message &msg);
       void handle_message( connection_ptr c, const lwc_section_request_message &msg);
-
+      void handle_message( connection_ptr c, const lwc_section_data_message &msg);
+      void handle_message( connection_ptr c, const ibc_trxs_request_message &msg);
+      void handle_message( connection_ptr c, const ibc_trxs_data_message &msg);
 
       void start_conn_timer( boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection );
-      void start_ibc_chain_contract_timer( );
-      void start_chain_timer( );
+      void start_ibc_heartbeat_timer( );
       void start_monitors( );
 
       lwc_section_type get_lwcls_info( );
@@ -176,8 +167,11 @@ namespace eosio { namespace ibc {
       /** Peer heartbeat ticker.
        */
       void ticker();
-      void chain_checker();
-      void ibc_chain_contract_checker();
+
+      void chain_checker( ibc_heartbeat_message& msg );
+      void ibc_chain_contract_checker( ibc_heartbeat_message& msg );
+      void ibc_token_contract_checker( ibc_heartbeat_message& msg );
+
       bool authenticate_peer(const handshake_message& msg) const;
 
       /** Retrieve public key used to authenticate with peers.
@@ -197,7 +191,6 @@ namespace eosio { namespace ibc {
        */
       chain::signature_type sign_compact(const chain::public_key_type& signer, const fc::sha256& digest) const;
 
-      uint16_t to_protocol_version(uint16_t v);
    };
 
    const fc::string logger_name("ibc_plugin_impl");
@@ -253,16 +246,10 @@ namespace eosio { namespace ibc {
 
    constexpr auto     message_header_size = 4;
 
-
-   /**
-    *  If there is a change to network protocol or behavior, increment net version to identify
-    *  the need for compatibility hooks
-    */
    constexpr uint16_t net_version = 1;
 
-
    struct handshake_initializer {
-      static void populate(handshake_message &hello);
+      static void populate( handshake_message& hello );
    };
    
    class connection : public std::enable_shared_from_this<connection> {
@@ -411,48 +398,7 @@ namespace eosio { namespace ibc {
 
 
 
-
-
-   //--------------- lwc_manager ---------------
-
-   class lwc_manager {
-   public:
-      void add_anchor_block_num( uint32_t num );
-      void send_anchor_block_num( );
-      
-   private:
-      std::set<uint32_t> blocks;
-
-   };
-   //--------------- lwc_manager ---------------
    
-   void lwc_manager::add_anchor_block_num( uint32_t num ) {
-      blocks.insert( num );
-   };
-
-   void lwc_manager::send_anchor_block_num() {
-      auto lwcls_lib_num = my_impl->get_lwcls_info().lib_num;
-
-      for ( auto num : blocks ){
-         if ( num <= lwcls_lib_num ){
-            blocks.erase( num );
-         }
-      }
-
-      if ( ! blocks.empty() ) {
-         lwc_anchor_block_message msg;
-         msg.num = *blocks.begin();
-         msg.id = my_impl->chain_plug->chain().get_block_id_for_num( msg.num );
-
-         for (auto &c : my_impl->connections ) {
-            if (c->socket->is_open()) {
-               c->enqueue( msg, true);
-            }
-         }
-      }
-   }
-
-
    // eosio contract related consts and functions
 
    static const uint32_t default_expiration_delta = 30;  ///< 30 seconds
@@ -622,8 +568,8 @@ namespace eosio { namespace ibc {
       bool lib_depth_valid();
 
       
-      uint32_t lwc_lib_depth = 0;
-      
+      uint32_t          lwc_lib_depth = 0;
+      contract_state    state = none;
    private:
       bool has_contract();
       bool initialized();
@@ -795,7 +741,7 @@ namespace eosio { namespace ibc {
       optional<global_mutable_ibc_token> get_global_mutable_singleton();
 
       // others
-
+      contract_state    state = none;
    private:
       bool has_contract();
       bool initialized();
@@ -950,13 +896,7 @@ namespace eosio { namespace ibc {
 
    }
 
-
-
-   //--------------- dispatch_manager ---------------
-
-   class dispatch_manager {
-
-   };
+   
 
    //--------------- connection ---------------
    
@@ -1841,13 +1781,13 @@ namespace eosio { namespace ibc {
       });
    }
 
-   void ibc_plugin_impl::start_ibc_chain_contract_timer() {
+   void ibc_plugin_impl::start_ibc_heartbeat_timer() {
       ibc_chain_contract_checker();
-      ibc_chain_contract_check->expires_from_now (ibc_chain_contract_interval);
-      ibc_chain_contract_check->async_wait ([this](boost::system::error_code ec) {
-         start_ibc_chain_contract_timer();
+      ibc_heartbeat_timer->expires_from_now (ibc_heartbeat_interval);
+      ibc_heartbeat_timer->async_wait ([this](boost::system::error_code ec) {
+         start_ibc_heartbeat_timer();
          if (ec) {
-            wlog ("start_ibc_chain_contract_timer error: ${m}", ("m", ec.message()));
+            wlog ("start_ibc_heartbeat_timer error: ${m}", ("m", ec.message()));
          }
       });
    }
@@ -1894,7 +1834,6 @@ namespace eosio { namespace ibc {
       }
 
       // get ibc transactions from ibc contract
-      // add lwc_manager anchor block number
 
 
 
@@ -2020,11 +1959,11 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::start_monitors() {
       connector_check.reset(new boost::asio::steady_timer( app().get_io_service()));
-      ibc_chain_contract_check.reset(new boost::asio::steady_timer( app().get_io_service()));
+      ibc_heartbeat_timer.reset(new boost::asio::steady_timer( app().get_io_service()));
       chain_check.reset(new boost::asio::steady_timer( app().get_io_service()));
 
       start_conn_timer(connector_period, std::weak_ptr<connection>());
-      start_ibc_chain_contract_timer();
+      start_ibc_heartbeat_timer();
       start_chain_timer();
    }
 
@@ -2270,9 +2209,7 @@ namespace eosio { namespace ibc {
 
          my->network_version_match = options.at( "ibc-version-match" ).as<bool>();
 
-         my->lwc_master.reset( new lwc_manager );
-         my->dispatcher.reset( new dispatch_manager );
-
+         
          EOS_ASSERT( options.count( "ibc-sidechain-id" ) && options.at("ibc-sidechain-id").as<string>() != string(),
             chain::plugin_config_exception, "ibc-sidechain-id not specified" );
          my->sidechain_id = fc::sha256( options.at( "ibc-sidechain-id" ).as<string>() );
