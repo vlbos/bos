@@ -126,7 +126,7 @@ namespace eosio {
       /**
        * this hearbeat message should broadcast every 5 seconds and when the lwcls has any update broadcast this too.
        * when received ibc_heartbeat_message, first, get all original transactions and cashconfirm transactions according to origtrxs and cashtrxs range info.
-       * then, combine with new_producers_replacement_block_range, start to get block header for the mininum block number, to let it into lib of lwc section.
+       * then, combine with new_producers_block_num, start to get block header for the mininum block number, to let it into lib of lwc section.
        * when required blocks enter the lib, push transactions of origtrxs and cashtrxs,
        */
       struct ibc_heartbeat_message {
@@ -137,7 +137,7 @@ namespace eosio {
 
          std::tuple<uint64_t,uint64_t>    origtrxs_table_id_range;
          std::tuple<uint64_t,uint64_t>    cashtrxs_table_seq_num_range;
-         std::tuple<uint32_t,uint32_t>    new_producers_replacement_block_range; // the first new producers replacement range after lwcls's lib;
+         uint32_t                         new_producers_block_num; // the first new producers replacement range after lwcls's lib;
       };
 
       /**
@@ -205,7 +205,7 @@ FC_REFLECT( eosio::ibc::go_away_message, (reason)(node_id) )
 FC_REFLECT( eosio::ibc::time_message, (org)(rec)(xmt)(dst) )
 
 FC_REFLECT( eosio::ibc::lwc_section_type, (first_num)(last_num)(lib_num)(first_id)(last_id)(lib_id)(valid) )
-FC_REFLECT( eosio::ibc::ibc_heartbeat_message, (ibc_chain_state)(ibc_token_state)(lwcls)(origtrxs_table_id_range)(cashtrxs_table_seq_num_range)(new_producers_replacement_block_range) )
+FC_REFLECT( eosio::ibc::ibc_heartbeat_message, (ibc_chain_state)(ibc_token_state)(lwcls)(origtrxs_table_id_range)(cashtrxs_table_seq_num_range)(new_producers_block_num) )
 FC_REFLECT( eosio::ibc::lwc_init_message, (header)(active_schedule)(blockroot_merkle) )
 FC_REFLECT( eosio::ibc::lwc_section_request_message, (start_block_num)(end_block_num) )
 FC_REFLECT( eosio::ibc::lwc_section_data_message, (headers)(blockroot_merkle) )

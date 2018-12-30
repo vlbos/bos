@@ -185,6 +185,7 @@ namespace eosio { namespace ibc {
 
       lwc_section_type get_lwcls_info( );
       bool head_catched_up( );
+      bool should_send_ibc_heartbeat();
       void chain_checker( ibc_heartbeat_message& msg );
       void ibc_chain_contract_checker( ibc_heartbeat_message& msg );
       void ibc_token_contract_checker( ibc_heartbeat_message& msg );
@@ -782,7 +783,7 @@ namespace eosio { namespace ibc {
 
       // other
       bool has_contract();
-      bool is_initialized_and_active();
+      void get_contract_state();
 
    private:
       name account;
@@ -792,15 +793,17 @@ namespace eosio { namespace ibc {
       return account_has_contract( account );
    }
 
-   bool ibc_token_contract::is_initialized_and_active(){
+   void ibc_token_contract::get_contract_state(){
+      if ( has_contract() ) {
+         state = deployed;
+      }
       auto p = get_global_state_singleton();
       if ( p.valid() ){
          const auto& obj = *p;
          if ( obj.ibc_contract != name() && obj.active ){
-            return true;
+            state = working;
          }
       }
-      return false;
    }
 
    std::tuple<uint64_t,uint64_t> ibc_token_contract::get_table_origtrxs_id_range() {
@@ -1842,12 +1845,34 @@ namespace eosio { namespace ibc {
              head_block_time_point > fc::time_point::now() - fc::seconds(5);
    }
 
-   void ibc_plugin_impl::chain_checker() {
+   bool ibc_plugin_impl::should_send_ibc_heartbeat(){
+      // check if head catched up
       if ( !head_catched_up() ){
          ilog("chain header doesn't catch up, wait");
-         return;
+         return false;
       }
 
+      // check ibc.chain contract
+      if ( chain_contract->state != working ){
+         chain_contract->get_contract_state();
+      }
+
+      if ( chain_contract->state == none || !chain_contract->lib_depth_valid() ){
+         ilog("ibc.chain contract not deployed");
+         return false;
+      }
+
+      // check ibc.token contract
+      if ( token_contract->state != working ){
+         ilog("ibc.token contract not in working state");
+         return false;
+      }
+
+      return true;
+   }
+
+   // check if has new producer schedule since lwc last section last block
+   void ibc_plugin_impl::chain_checker( ibc_heartbeat_message& msg ) {
       auto lwcls = get_lwcls_info();
       if ( lwcls == lwc_section_type() ){
          ilog("doesn't get light weight client last section infomation");
@@ -1889,74 +1914,51 @@ namespace eosio { namespace ibc {
             fc_ilog( logger, "---*---");
          }
 
-         lwc_master->add_anchor_block_num( search_first.block_num() );
-         ilog("set anchor block number ${n}",("n",search_first.block_num()));
-         return;
-      }
-
-      // one hour
-      if ( ls_last_header.block_num() - lwcls.last_num >= 7200 ){
-         lwc_master->add_anchor_block_num( local_safe_header.block_num() );
+         msg.new_producers_block_num = search_first.block_num();
       }
    }
 
-   void ibc_plugin_impl::ibc_chain_contract_checker() {
+   // get lwcls info
+   void ibc_plugin_impl::ibc_chain_contract_checker( ibc_heartbeat_message& msg ) {
 
-      ilog("++++++++++++========");test();return;
-
-      if ( contract_state == none ){
-         wlog("ibc contract does not exist");
-         chain_contract->get_contract_state();
-         return;
-      }
-
-      if ( !chain_contract->lib_depth_valid() ){
-         wlog("ibc contract global singleton config lib_depth not valid");
-         chain_contract->get_contract_state();
-         return;
-      }
-
-      // send heartbeat message
-      ibc_heartbeat_message msg;
-      msg.state = contract_state;
-
-      if ( contract_state != deployed ){
          auto p = my_impl->chain_contract->get_sections_tb_reverse_nth_section();
-
          if ( p.valid() ){
             auto obj = *p;
-            msg.ls.first_num = obj.first;
-            msg.ls.first_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.first_num );
-            msg.ls.last_num = obj.last;
-            msg.ls.last_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.last_num );
-            msg.ls.lib_num = std::max( obj.last - chain_contract->lwc_lib_depth, obj.first );
-            msg.ls.lib_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.lib_num );
-            msg.ls.valid = obj.valid;
+            lwc_section_type ls;
+            ls.first_num = obj.first;
+            ls.first_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.first_num );
+            ls.last_num = obj.last;
+            ls.last_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.last_num );
+            if (  obj.last - chain_contract->lwc_lib_depth >= obj.first ){
+               ls.lib_num = obj.last - chain_contract->lwc_lib_depth;
+               ls.lib_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.lib_num );
+            } else {
+               ls.lib_num = 0;
+               ls.lib_id = block_id_type();
+            }
+            ls.valid = obj.valid;
          }
-      }
 
-      for (auto &c : connections ) {
-         if (c->socket->is_open()) {
-            c->enqueue( msg, true);
-         }
-      }
-
-      // get ibc transactions from ibc contract
-
-
-
-
-
-
-
+         msg.ibc_chain_state = chain_contract->state;
+         msg.lwcls = ls;
    }
 
+   // get two table info
    void ibc_plugin_impl::ibc_token_contract_checker( ibc_heartbeat_message& msg ){
-
+      msg.ibc_token_state = token_contract->state;
+      msg.origtrxs_table_id_range = get_table_origtrxs_id_range();
+      msg.cashtrxs_table_seq_num_range = get_table_cashtrxs_seq_num_range();
    }
 
    void ibc_plugin_impl::start_ibc_heartbeat_timer() {
-      ibc_chain_contract_checker();
+      if ( should_send_ibc_heartbeat() ){
+         ibc_heartbeat_message msg;
+         chain_checker(msg);
+         ibc_chain_contract_checker(msg);
+         ibc_token_contract_checker(msg);
+         send_all( msg );
+      }
+
       ibc_heartbeat_timer->expires_from_now (ibc_heartbeat_interval);
       ibc_heartbeat_timer->async_wait ([this](boost::system::error_code ec) {
          start_ibc_heartbeat_timer();
