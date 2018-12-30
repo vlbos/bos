@@ -62,7 +62,29 @@ namespace eosio { namespace ibc {
    using connection_wptr = std::weak_ptr<connection>;
    using socket_ptr = std::shared_ptr<tcp::socket>;
    using ibc_message_ptr = shared_ptr<ibc_message>;
-   
+
+   typedef multi_index_container<
+         ibc_trx_rich_info,
+         indexed_by<
+               ordered_unique<
+                     tag< by_table_id >,
+                     member < ibc_trx_rich_info,
+                           uint64_t,
+                           &ibc_trx_rich_info::table_id > >,
+               ordered_non_unique<
+                     tag< by_block_num >,
+                     member< ibc_trx_rich_info,
+                           uint32_t,
+                           &ibc_trx_rich_info::block_num > >,
+               ordered_non_unique<
+                     tag< by_trx_id >,
+                     member< ibc_trx_rich_info,
+                           transaction_id_type,
+                           &ibc_trx_rich_info::trx_id > >
+         >
+   >
+   ibc_transaction_index;
+
    class ibc_plugin_impl {
    public:
       unique_ptr<tcp::acceptor>        acceptor;
@@ -74,7 +96,7 @@ namespace eosio { namespace ibc {
 
       vector<string>                   supplied_peers;
       vector<chain::public_key_type>   allowed_peers; ///< peer keys allowed to connect
-      std::map<chain::public_key_type, chain::private_key_type> private_keys; ///< overlapping with producer keys, also authenticating non-producing nodes
+      std::map<chain::public_key_type, chain::private_key_type> private_keys; 
 
       enum possible_connections : char {
          None = 0,
@@ -88,6 +110,8 @@ namespace eosio { namespace ibc {
       std::set< connection_ptr >       connections;
       bool                             done = false;
 
+      name                                   relay;
+      chain::private_key_type                relay_private_key;
       unique_ptr< ibc_chain_contract >       chain_contract;
       unique_ptr< ibc_token_contract >       token_contract;
       
@@ -108,6 +132,9 @@ namespace eosio { namespace ibc {
       fc::sha256                    sidechain_id;
       fc::sha256                    node_id;
 
+      ibc_transaction_index         local_origtrxs;
+      ibc_transaction_index         local_cashtrxs;
+
       string                        user_agent_name;
       chain_plugin*                 chain_plug = nullptr;
       int                           started_sessions = 0;
@@ -126,7 +153,8 @@ namespace eosio { namespace ibc {
       size_t count_open_sockets() const;
 
       template<typename VerifierFunc>
-      void send_all( const ibc_message &msg, VerifierFunc verify );
+      void send_all( const ibc_message& msg, VerifierFunc verify );
+      void send_all( const ibc_message& msg );
 
       void accepted_block_header(const block_state_ptr&);
       void accepted_block(const block_state_ptr&);
@@ -155,22 +183,21 @@ namespace eosio { namespace ibc {
       void handle_message( connection_ptr c, const ibc_trxs_request_message &msg);
       void handle_message( connection_ptr c, const ibc_trxs_data_message &msg);
 
-      void start_conn_timer( boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection );
-      void start_ibc_heartbeat_timer( );
-      void start_monitors( );
-
       lwc_section_type get_lwcls_info( );
       bool head_catched_up( );
+      void chain_checker( ibc_heartbeat_message& msg );
+      void ibc_chain_contract_checker( ibc_heartbeat_message& msg );
+      void ibc_token_contract_checker( ibc_heartbeat_message& msg );
+      void start_ibc_heartbeat_timer( );
 
       void connection_monitor(std::weak_ptr<connection> from_connection);
+      void start_conn_timer( boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection );
+
+      void start_monitors( );
 
       /** Peer heartbeat ticker.
        */
       void ticker();
-
-      void chain_checker( ibc_heartbeat_message& msg );
-      void ibc_chain_contract_checker( ibc_heartbeat_message& msg );
-      void ibc_token_contract_checker( ibc_heartbeat_message& msg );
 
       bool authenticate_peer(const handshake_message& msg) const;
 
@@ -303,7 +330,7 @@ namespace eosio { namespace ibc {
 
       bool connected();
       bool current();
-      void reset();
+      void reset(){};
       void close();
       void send_handshake();
 
@@ -339,8 +366,6 @@ namespace eosio { namespace ibc {
       void flush_queues();
 
       void cancel_wait();
-//      void sync_wait();
-//      void sync_timeout(boost::system::error_code ec);
 
       void queue_write(std::shared_ptr<vector<char>> buff,
                        bool trigger_send,
@@ -397,16 +422,13 @@ namespace eosio { namespace ibc {
    };
 
 
-
-   
-   // eosio contract related consts and functions
-
+   // ---- contract related consts ----
    static const uint32_t default_expiration_delta = 30;  ///< 30 seconds
    static const fc::microseconds abi_serializer_max_time{500 * 1000}; ///< 500ms
    static const uint32_t  min_lwc_lib_depth = 50;
    static const uint32_t  max_lwc_lib_depth = 200;
 
-
+   // ---- low layer function to read contract table and singleton ----
    optional<key_value_object>  get_table_nth_row_kvo_by_primary_key( const name& code, const name& scope, const name& table, const uint64_t nth = 0, bool reverse = false ) {
       const auto& d = app().get_plugin<chain_plugin>().chain().db();
       const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(code, scope, table));
@@ -467,7 +489,6 @@ namespace eosio { namespace ibc {
       return std::make_tuple{ 0, 0 };
    }
 
-   
    optional<key_value_object>  get_singleton_kvo( const name& code, const name& scope, const name& table ) {
       const auto &d = app().get_plugin<chain_plugin>().chain().db();
       const auto *t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(
@@ -486,7 +507,20 @@ namespace eosio { namespace ibc {
       return optional<key_value_object>();
    }
 
-
+   // ---- contract exist check ----
+   bool account_has_contract( name account ){
+      auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
+      eosio::chain_apis::read_only::get_code_hash_params params{account};
+      try {
+         auto result = ro_api.get_code_hash( params );
+         if ( result.code_hash != fc::sha256() ){
+            return true;
+         }
+      } catch (...){}
+      return false;
+   }
+   
+   // ---- transaction constructor and push function ----
    void set_transaction_headers( transaction& trx, uint32_t expiration = default_expiration_delta, uint32_t delay_sec = 0 ) {
       trx.expiration = my_impl->chain_plug->chain().head_block_time() + fc::seconds(expiration);
       trx.set_reference_block( my_impl->chain_plug->chain().last_irreversible_block_id() );
@@ -544,86 +578,76 @@ namespace eosio { namespace ibc {
       push_transaction( trx );
    }
 
-   // --------------- ibc_chain_contract ---------------
 
+   // --------------- ibc_chain_contract ---------------
+   
    class ibc_chain_contract {
    public:
-      ibc_chain_contract(  name contract ):account(contract){}
+      ibc_chain_contract( name contract ):account(contract){}
+
+      contract_state                      state = none;
+      uint32_t                            lwc_lib_depth = 0;
+      std::vector<blockroot_merkle_type>  history_blockroot_merkles;
 
       // actions
-      void chain_init( const lwc_init_message &msg );
-      void newsection( const new_section_params &sct );
-      void addheaders( const std::vector<signed_block_header> headers );
+      void chain_init( const lwc_init_message& msg );
+      void pushsection( const lwc_section_data_message& msg );
+      void blockmerkle( const blockroot_merkle_type& data );
 
       // tables
-      optional<section_type> get_table_sections_reverse_nth( uint64_t nth = 0 );
-      optional<block_header_state_type> get_table_chaindb_by_block_num( uint64_t num );
-      block_id_type get_block_id_by_block_num( uint64_t num );
+      optional<section_type> get_sections_tb_reverse_nth_section( uint64_t nth = 0 );
+      optional<block_header_state_type> get_chaindb_tb_bhs_by_block_num( uint64_t num );
+      block_id_type get_chaindb_tb_block_id_by_block_num( uint64_t num );
       optional<global_state_ibc_chain> get_global_singleton();
-      std::vector<ibctrx_info> get_table_ibctrxs_by_state_up_to( uint32_t block_time_slot );
+      void get_blkrtmkls_tb();
 
+      // other
+      bool has_contract() const;
+      bool lwc_initialized() const;
+      bool lib_depth_valid() const;
+      void get_contract_state();
 
-      // others
-      void get_basic_info();
-      bool lib_depth_valid();
-
-      
-      uint32_t          lwc_lib_depth = 0;
-      contract_state    state = none;
    private:
-      bool has_contract();
-      bool initialized();
-
       name account;
    };
 
-   bool ibc_chain_contract::has_contract(){
-      auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
-      eosio::chain_apis::read_only::get_code_hash_params params{account};
-      try {
-         auto result = ro_api.get_code_hash( params );
-         if ( result.code_hash != fc::sha256() ){
-            return true;
-         }
-      } catch (...){}
-      return false;
+   bool ibc_chain_contract::has_contract() const {
+      return account_has_contract( account );
    }
 
-   bool ibc_chain_contract::initialized(){
-      auto ret = get_table_sections_reverse_nth();
+   bool ibc_chain_contract::lwc_initialized() const {
+      auto ret = get_sections_tb_reverse_nth_section();
       if ( ret.valid() ){
          return true;
       }
       return false;
    }
-
    
-   void ibc_chain_contract::get_basic_info(){
-      ibc_chain_contract_state state = none;
-      if ( has_contract() ){
+   void ibc_chain_contract::get_contract_state(){
+      if ( has_contract() ) {
          state = deployed;
-         if ( initialized() ){
+      }
+      if ( !lwc_initialized() ){
+         return;
+      }
+      auto sp = get_global_singleton();
+      if ( sp.valid() ) {
+         global_state_ibc_chain gstate = *sp;
+         lwc_lib_depth = gstate.lib_depth;
+         if ( lib_depth_valid() ){
             state = working;
          }
       }
-      my_impl->contract_state = state;
-
-      global_state_ibc_chain gstate;
-      auto sp = get_global_singleton();
-      if ( sp.valid() ) {
-         gstate = *sp;
-         lwc_lib_depth = gstate.lib_depth;
-      }
    }
 
-   bool ibc_chain_contract::lib_depth_valid(){
+   bool ibc_chain_contract::lib_depth_valid() const {
       if ( lwc_lib_depth >= min_lwc_lib_depth && lwc_lib_depth <= max_lwc_lib_depth ){
          return true;
       }
       return false;
    }
 
-   optional<section_type> ibc_chain_contract::get_table_sections_reverse_nth( uint64_t nth ){
+   optional<section_type> ibc_chain_contract::get_sections_tb_reverse_nth_section( uint64_t nth ){
       auto p = get_table_nth_row_kvo_by_primary_key( account, account, N(sections), nth, true );
       if ( p.valid() ){
          auto obj = *p;
@@ -635,7 +659,7 @@ namespace eosio { namespace ibc {
       return optional<section_type>();
    }
 
-   optional<block_header_state_type> ibc_chain_contract::get_table_chaindb_by_block_num( uint64_t num ){
+   optional<block_header_state_type> ibc_chain_contract::get_chaindb_tb_bhs_by_block_num( uint64_t num ){
       chain_apis::read_only::get_table_rows_params par;
       par.json = true;  // must be true
       par.code = account;
@@ -657,8 +681,8 @@ namespace eosio { namespace ibc {
       return optional<block_header_state_type>();
    }
 
-   block_id_type ibc_chain_contract::get_block_id_by_block_num( uint64_t num ){
-      auto p = get_table_chaindb_by_block_num( num );
+   block_id_type ibc_chain_contract::get_chaindb_tb_block_id_by_block_num( uint64_t num ){
+      auto p = get_chaindb_tb_bhs_by_block_num( num );
       if ( p.valid() ){
          return p->block_id;
       }
@@ -677,48 +701,64 @@ namespace eosio { namespace ibc {
       return optional<global_state_ibc_chain>();
    }
 
-   std::vector<ibctrx_info> ibc_contract::get_table_ibctrxs_by_state_up_to( uint32_t block_time_slot ){
+   void ibc_chain_contract::get_blkrtmkls_tb(){
+      const auto& d = app().get_plugin<chain_plugin>().chain().db();
+      const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(account, account, N(blkrtmkls)));
+      if (t_id != nullptr) {
+         const auto &idx = d.get_index<chain::key_value_index, chain::by_scope_primary>();
+         decltype(t_id->id) next_tid(t_id->id._id + 1);
+         auto lower = idx.lower_bound(boost::make_tuple(t_id->id));
+         auto upper = idx.lower_bound(boost::make_tuple(next_tid));
 
+         for (auto itr = lower; itr != upper; ++itr) {
+            const key_value_object &obj = *itr;
+            fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
+            blockroot_merkle_type result;
+            fc::raw::unpack( ds, result );
+            history_blockroot_merkles.push_back( result );
+         }
+      }
    }
 
    void ibc_chain_contract::chain_init( const lwc_init_message &msg ){
       auto actn = get_action( account, N(chaininit), vector<permission_level>{{ account, config::active_name}}, mvo()
-      ("header",            fc::raw::pack(msg.header))
-      ("active_schedule",   msg.active_schedule)
-      ("blockroot_merkle",  msg.blockroot_merkle));
+            ("header",            fc::raw::pack(msg.header))
+            ("active_schedule",   msg.active_schedule)
+            ("blockroot_merkle",  msg.blockroot_merkle));
 
       if ( ! actn.valid() ){
          elog("chain_init: get action failed");
          return;
       }
-
       push_action( *actn );
    }
 
-   void ibc_chain_contract::newsection( const new_section_params &sct ){
-      auto actn = get_action( account, N(newsection), vector<permission_level>{{ account, config::active_name}}, mvo()
-         ("headers",           fc::raw::pack(sct.headers))
-         ("blockroot_merkle",  sct.blockroot_merkle));
+   void ibc_chain_contract::pushsection( const lwc_section_data_message& msg ){
+      auto actn = get_action( account, N(pushsection), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+            ("headers",           fc::raw::pack(msg.headers))
+            ("blockroot_merkle",  msg.blockroot_merkle)
+            ("relay",             my_impl->relay));
 
       if ( ! actn.valid() ){
          elog("newsection: get action failed");
          return;
       }
-
       push_action( *actn );
    }
 
-   void ibc_chain_contract::addheaders( const std::vector<signed_block_header> headers ){
-      auto actn = get_action( account, N(addheaders), vector<permission_level>{{ account, config::active_name}}, mvo()
-         ("headers",            fc::raw::pack(headers)));
+   void ibc_chain_contract::blockmerkle( const blockroot_merkle_type& data ){
+      auto actn = get_action( account, N(blockmerkle), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+            ("block_num",         data.block_num)
+            ("merkle",            data.merkle)
+            ("relay",             my_impl->relay));
 
       if ( ! actn.valid() ){
-         elog("addheaders: get action failed");
+         elog("newsection: get action failed");
          return;
       }
-
       push_action( *actn );
    }
+
 
    // --------------- ibc_token_contract ---------------
 
@@ -726,51 +766,48 @@ namespace eosio { namespace ibc {
    public:
       ibc_token_contract( name contract ):account(contract){}
 
+      contract_state    state = none;
+
       // actions
       void cash( const cash_action_params& p );
       void cashconfirm( const cashconfirm_action_params& p );
 
       // tables
       std::tuple<uint64_t,uint64_t> get_table_origtrxs_id_range();
-      optional<original_trx_info> get_table_origtrxs_by_id( uint64_t id );
+      optional<original_trx_info> get_table_origtrxs_trx_info_by_id( uint64_t id );
       std::tuple<uint64_t,uint64_t> get_table_cashtrxs_seq_num_range();
-      optional<cash_trx_info> get_table_cashtrxs_by_seq_num( uint64_t seq_num );
-
-      // singletons
+      optional<cash_trx_info> get_table_cashtrxs_trx_info_by_seq_num( uint64_t seq_num );
       optional<global_state_ibc_token> get_global_state_singleton();
       optional<global_mutable_ibc_token> get_global_mutable_singleton();
 
-      // others
-      contract_state    state = none;
-   private:
+      // other
       bool has_contract();
-      bool initialized();
+      bool is_initialized_and_active();
 
+   private:
       name account;
    };
 
-
    bool ibc_token_contract::has_contract(){
-      auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
-      eosio::chain_apis::read_only::get_code_hash_params params{account};
-      try {
-         auto result = ro_api.get_code_hash( params );
-         if ( result.code_hash != fc::sha256() ){
-            return true;
-         }
-      } catch (...){}
-      return false;
+      return account_has_contract( account );
    }
 
-   bool ibc_token_contract::initialized(){
-      return true;
+   bool ibc_token_contract::is_initialized_and_active(){
+      auto p = get_global_state_singleton();
+      if ( p.valid() ){
+         const auto& obj = *p;
+         if ( obj.ibc_contract != name() && obj.active ){
+            return true;
+         }
+      }
+      return false;
    }
 
    std::tuple<uint64_t,uint64_t> ibc_token_contract::get_table_origtrxs_id_range() {
       return get_table_primary_key_range( account, account, N(origtrxs) );
    }
 
-   optional<original_trx_info> ibc_token_contract::get_table_origtrxs_by_id( uint64_t id ) {
+   optional<original_trx_info> ibc_token_contract::get_table_origtrxs_trx_info_by_id( uint64_t id ) {
       chain_apis::read_only::get_table_rows_params par;
       par.json = true;  // must be true
       par.code = account;
@@ -796,7 +833,7 @@ namespace eosio { namespace ibc {
       return get_table_primary_key_range( account, account, N(cashtrxs) );
    }
 
-   optional<cash_trx_info> ibc_token_contract::get_table_cashtrxs_by_seq_num( uint64_t seq_num ) {
+   optional<cash_trx_info> ibc_token_contract::get_table_cashtrxs_trx_info_by_seq_num( uint64_t seq_num ) {
       chain_apis::read_only::get_table_rows_params par;
       par.json = true;  // must be true
       par.code = account;
@@ -885,7 +922,7 @@ namespace eosio { namespace ibc {
    void test(){
       ibc_chain_contract ct(N(eos222333ibc));
 
-      auto r = ct.get_table_chaindb_by_block_num(22960);
+      auto r = ct.get_chaindb_tb_bhs_by_block_num(22960);
 
       if (r.valid()){
          idump((*r));
@@ -949,10 +986,6 @@ namespace eosio { namespace ibc {
       return connected();
    }
 
-   void connection::reset() {
-
-   }
-
    void connection::flush_queues() {
       write_queue.clear();
    }
@@ -975,8 +1008,6 @@ namespace eosio { namespace ibc {
       cancel_wait();
       pending_message_buffer.reset();
    }
-
-
 
    void connection::send_handshake( ) {
       handshake_initializer::populate(last_handshake_sent);
@@ -1080,7 +1111,6 @@ namespace eosio { namespace ibc {
       });
    }
 
-
    void connection::enqueue( const ibc_message &m, bool trigger_send ) {
       go_away_reason close_after_send = no_reason;
       if (m.contains<go_away_message>()) {
@@ -1144,7 +1174,7 @@ namespace eosio { namespace ibc {
    }
 
 
-   //--------------- ibc_plugin_impl ---------------
+   // --------------- ibc_plugin_impl ---------------
 
    void ibc_plugin_impl::connect( connection_ptr c ) {
       if( c->no_retry != go_away_reason::no_reason) {
@@ -1413,6 +1443,18 @@ namespace eosio { namespace ibc {
       }
    }
 
+   void ibc_plugin_impl::close( connection_ptr c ) {
+      if( c->peer_addr.empty( ) && c->socket->is_open() ) {
+         if (num_clients == 0) {
+            fc_wlog( logger, "num_clients already at 0");
+         }
+         else {
+            --num_clients;
+         }
+      }
+      c->close();
+   }
+
    size_t ibc_plugin_impl::count_open_sockets() const {
       size_t count = 0;
       for( auto &c : connections) {
@@ -1429,6 +1471,31 @@ namespace eosio { namespace ibc {
             c->enqueue( msg );
          }
       }
+   }
+
+   void ibc_plugin_impl::send_all( const ibc_message& msg ) {
+      for( auto &c : connections) {
+         if( c->current() ) {
+            c->enqueue( msg );
+         }
+      }
+   }
+
+   void ibc_plugin_impl::accepted_block_header(const block_state_ptr& block) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+   }
+
+   void ibc_plugin_impl::accepted_block(const block_state_ptr& block) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+   }
+
+   void ibc_plugin_impl::irreversible_block(const block_state_ptr&block) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+      // 每小时记录一个blockmroot
+   }
+
+   void ibc_plugin_impl::accepted_confirmation(const header_confirmation& head) {
+      fc_dlog(logger,"signaled, id = ${id}",("id", head.block_id));
    }
 
    bool ibc_plugin_impl::is_valid( const handshake_message &msg) {
@@ -1455,6 +1522,8 @@ namespace eosio { namespace ibc {
       }
       return valid;
    }
+
+   ///< core inter blockchain communication logic implementation
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const handshake_message &msg) {
       peer_ilog(c, "received handshake_message");
@@ -1638,99 +1707,13 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const request_lwcls_message &msg) {
-      peer_ilog(c, "received request_lwcls_message");
-   }
-
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwcls_detail_message &msg) {
-      peer_ilog(c, "received lwcls_detail_message");
-   }
-
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_init_message &msg) {
       peer_ilog(c, "received lwc_init_message");
 
-      chain_contract->get_basic_info();
+      chain_contract->get_contract_state();
       if ( contract_state == deployed && chain_contract->lib_depth_valid() ){
          chain_contract->chain_init( msg );
       }
-   }
-
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data_message &msg) {
-      peer_ilog(c, "received lwc_section_data_message");
-
-      auto p = contract->get_table_sections_reverse_nth();
-      if ( !p.valid() ){
-         return;
-      }
-
-      auto obj = *p;
-
-      if ( msg.headers.front().block_num() > obj.last ){ // new section and push headers
-         new_section_params par;
-         par.headers = msg.headers;
-         par.blockroot_merkle = msg.blockroot_merkle;
-         contract->newsection( par );
-         return;
-      }
-
-      if ( obj.valid && msg.headers.rbegin()->block_num() <= obj.last - contract->lwc_lib_depth ){ // nothing to do
-         return;
-      }
-
-      // find the first block number, which id is same in msg and lwc chaindb.
-      uint32_t check_num_first = std::min( uint32_t(obj.last), msg.headers.rbegin()->block_num() );
-      uint32_t check_num_last = std::max( uint32_t(obj.valid ? obj.last - contract->lwc_lib_depth : obj.first)
-            , msg.headers.front().block_num() );
-      uint32_t identical_num = 0;
-      uint32_t check_num = check_num_first;
-      while ( check_num >= check_num_last ){
-         auto id_from_msg = msg.headers[ check_num - msg.headers.front().block_num()].id();
-         auto id_from_lwc = contract->get_block_id_by_block_num( check_num );
-         if ( id_from_lwc != block_id_type() && id_from_msg == id_from_lwc ){
-            identical_num = check_num;
-            break;
-         }
-         --check_num;
-      }
-      if ( identical_num == 0 ){
-         if ( check_num == obj.first ){
-            // delete lwcls
-         }
-         return;
-      }
-
-      // construct and push headers
-      std::vector<signed_block_header> headers;
-
-      auto first_itr = msg.headers.begin() + ( identical_num - msg.headers.front().block_num() );
-      auto last_itr = msg.headers.end();
-      if ( msg.headers.rbegin()->block_num() - identical_num > 50 ){ // max block header per time
-         last_itr = first_itr + 50;
-      }
-      contract->addheaders( std::vector<signed_block_header>(first_itr, last_itr) );
-   }
-
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_ibctrx_data &msg) {
-      peer_ilog(c, "received lwc_ibctrx_data");
-   }
-
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_anchor_block_message &msg) {
-      peer_ilog(c, "received lwc_anchor_block_message");
-
-      auto p = contract->get_table_sections_reverse_nth();
-      if ( p.valid() && msg.num > (*p).last - contract->lwc_lib_depth ){
-         // request next trunch
-         lwc_section_request_message msg;
-         msg.start_block_num = (*p).last;
-         msg.end_block_num = msg.start_block_num + 50;
-
-         for (auto &c : connections ) {
-            if (c->socket->is_open()) {
-               c->enqueue( msg, true);
-            }
-         }
-      }
-
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_request_message &msg) {
@@ -1768,93 +1751,95 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection) {
-      connector_check->expires_from_now( du);
-      connector_check->async_wait( [this, from_connection](boost::system::error_code ec) {
-         if( !ec) {
-            connection_monitor(from_connection);
-         }
-         else {
-            elog( "Error from connection check monitor: ${m}",( "m", ec.message()));
-            start_conn_timer( connector_period, std::weak_ptr<connection>());
-         }
-      });
-   }
+   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data_message &msg) {
+      peer_ilog(c, "received lwc_section_data_message");
 
-   void ibc_plugin_impl::start_ibc_heartbeat_timer() {
-      ibc_chain_contract_checker();
-      ibc_heartbeat_timer->expires_from_now (ibc_heartbeat_interval);
-      ibc_heartbeat_timer->async_wait ([this](boost::system::error_code ec) {
-         start_ibc_heartbeat_timer();
-         if (ec) {
-            wlog ("start_ibc_heartbeat_timer error: ${m}", ("m", ec.message()));
-         }
-      });
-   }
-
-   void ibc_plugin_impl::ibc_chain_contract_checker() {
-
-      ilog("++++++++++++========");test();return;
-
-      if ( contract_state == none ){
-         wlog("ibc contract does not exist");
-         chain_contract->get_basic_info();
+      auto p = contract->get_sections_tb_reverse_nth_section();
+      if ( !p.valid() ){
          return;
       }
 
-      if ( !chain_contract->lib_depth_valid() ){
-         wlog("ibc contract global singleton config lib_depth not valid");
-         chain_contract->get_basic_info();
+      auto obj = *p;
+
+      if ( msg.headers.front().block_num() > obj.last ){ // new section and push headers
+         new_section_params par;
+         par.headers = msg.headers;
+         par.blockroot_merkle = msg.blockroot_merkle;
+         contract->newsection( par );
          return;
       }
 
-      // send heartbeat message
-      ibc_heartbeat_message msg;
-      msg.state = contract_state;
-
-      if ( contract_state != deployed ){
-         auto p = my_impl->chain_contract->get_table_sections_reverse_nth();
-
-         if ( p.valid() ){
-            auto obj = *p;
-            msg.ls.first_num = obj.first;
-            msg.ls.first_id = chain_contract->get_block_id_by_block_num( msg.ls.first_num );
-            msg.ls.last_num = obj.last;
-            msg.ls.last_id = chain_contract->get_block_id_by_block_num( msg.ls.last_num );
-            msg.ls.lib_num = std::max( obj.last - chain_contract->lwc_lib_depth, obj.first );
-            msg.ls.lib_id = chain_contract->get_block_id_by_block_num( msg.ls.lib_num );
-            msg.ls.valid = obj.valid;
-         }
+      if ( obj.valid && msg.headers.rbegin()->block_num() <= obj.last - contract->lwc_lib_depth ){ // nothing to do
+         return;
       }
 
+      // find the first block number, which id is same in msg and lwc chaindb.
+      uint32_t check_num_first = std::min( uint32_t(obj.last), msg.headers.rbegin()->block_num() );
+      uint32_t check_num_last = std::max( uint32_t(obj.valid ? obj.last - contract->lwc_lib_depth : obj.first)
+            , msg.headers.front().block_num() );
+      uint32_t identical_num = 0;
+      uint32_t check_num = check_num_first;
+      while ( check_num >= check_num_last ){
+         auto id_from_msg = msg.headers[ check_num - msg.headers.front().block_num()].id();
+         auto id_from_lwc = contract->get_chaindb_tb_block_id_by_block_num( check_num );
+         if ( id_from_lwc != block_id_type() && id_from_msg == id_from_lwc ){
+            identical_num = check_num;
+            break;
+         }
+         --check_num;
+      }
+      if ( identical_num == 0 ){
+         if ( check_num == obj.first ){
+            // delete lwcls
+         }
+         return;
+      }
+
+      // construct and push headers
+      std::vector<signed_block_header> headers;
+
+      auto first_itr = msg.headers.begin() + ( identical_num - msg.headers.front().block_num() );
+      auto last_itr = msg.headers.end();
+      if ( msg.headers.rbegin()->block_num() - identical_num > 50 ){ // max block header per time
+         last_itr = first_itr + 50;
+      }
+      contract->addheaders( std::vector<signed_block_header>(first_itr, last_itr) );
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_request_message &msg) {
+      peer_ilog(c, "received ibc_trxs_request_message");
+   }
+
+   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_data_message &msg) {
+      peer_ilog(c, "received ibc_trxs_data_message");
+
+   }
+
+   lwc_section_type ibc_plugin_impl::get_lwcls_info() {
+      std::vector<lwc_section_type> sv;
       for (auto &c : connections ) {
-         if (c->socket->is_open()) {
-            c->enqueue( msg, true);
+         if ( c->lwcls_info_update_time != fc::time_point() &&
+              c->lwcls_info != lwc_section_type() &&
+              ( fc::time_point::now() - c->lwcls_info_update_time < fc::seconds(30)) ){
+            sv.push_back( c->lwcls_info );
          }
       }
 
-      // get ibc transactions from ibc contract
+      if( sv.empty() ){
+         return lwc_section_type();
+      }
 
+      std::sort( sv.begin(), sv.end(), []( lwc_section_type s1, lwc_section_type s2 ){
+         return s1.first_num < s2.first_num ;
+      } );
 
-
-
-
-
-
+      return sv[ sv.size() / 2 + 1 ];
    }
 
-   void ibc_plugin_impl::start_chain_timer() {
-      // ibc_contract_checker();
-      chain_checker();
-      lwc_master->send_anchor_block_num();
-
-      chain_check->expires_from_now (chain_interval);
-      chain_check->async_wait ([this](boost::system::error_code ec) {
-         start_chain_timer();
-         if (ec) {
-            wlog ("start_chain_timer error: ${m}", ("m", ec.message()));
-         }
-      });
+   bool ibc_plugin_impl::head_catched_up() {
+      auto head_block_time_point = fc::time_point( chain_plug->chain().fork_db_head_block_time() );
+      return head_block_time_point < fc::time_point::now() + fc::seconds(3) &&
+             head_block_time_point > fc::time_point::now() - fc::seconds(5);
    }
 
    void ibc_plugin_impl::chain_checker() {
@@ -1893,7 +1878,7 @@ namespace eosio { namespace ibc {
          search_middle = get_block_header( ls_last_header.block_num() + ( search_last.block_num() - ls_last_header.block_num() ) / 2 );
 
          while( !(search_first.schedule_version == ls_last_header.schedule_version &&
-         get_block_header( search_first.block_num() + 1 ).schedule_version == ls_last_header.schedule_version + 1 ) ){
+                  get_block_header( search_first.block_num() + 1 ).schedule_version == ls_last_header.schedule_version + 1 ) ){
             if ( search_middle.schedule_version != ls_last_header.schedule_version  ){
                search_last = search_middle;
                search_middle = get_block_header( ls_last_header.block_num() + ( search_last.block_num() - ls_last_header.block_num() ) / 2 );
@@ -1915,56 +1900,70 @@ namespace eosio { namespace ibc {
       }
    }
 
-   lwc_section_type ibc_plugin_impl::get_lwcls_info() {
-      std::vector<lwc_section_type> sv;
+   void ibc_plugin_impl::ibc_chain_contract_checker() {
+
+      ilog("++++++++++++========");test();return;
+
+      if ( contract_state == none ){
+         wlog("ibc contract does not exist");
+         chain_contract->get_contract_state();
+         return;
+      }
+
+      if ( !chain_contract->lib_depth_valid() ){
+         wlog("ibc contract global singleton config lib_depth not valid");
+         chain_contract->get_contract_state();
+         return;
+      }
+
+      // send heartbeat message
+      ibc_heartbeat_message msg;
+      msg.state = contract_state;
+
+      if ( contract_state != deployed ){
+         auto p = my_impl->chain_contract->get_sections_tb_reverse_nth_section();
+
+         if ( p.valid() ){
+            auto obj = *p;
+            msg.ls.first_num = obj.first;
+            msg.ls.first_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.first_num );
+            msg.ls.last_num = obj.last;
+            msg.ls.last_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.last_num );
+            msg.ls.lib_num = std::max( obj.last - chain_contract->lwc_lib_depth, obj.first );
+            msg.ls.lib_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.lib_num );
+            msg.ls.valid = obj.valid;
+         }
+      }
+
       for (auto &c : connections ) {
-         if ( c->lwcls_info_update_time != fc::time_point() &&
-         c->lwcls_info != lwc_section_type() &&
-               ( fc::time_point::now() - c->lwcls_info_update_time < fc::seconds(30)) ){
-            sv.push_back( c->lwcls_info );
+         if (c->socket->is_open()) {
+            c->enqueue( msg, true);
          }
       }
 
-      if( sv.empty() ){
-         return lwc_section_type();
-      }
+      // get ibc transactions from ibc contract
 
-      std::sort( sv.begin(), sv.end(), []( lwc_section_type s1, lwc_section_type s2 ){
-         return s1.first_num < s2.first_num ;
-      } );
 
-      return sv[ sv.size() / 2 + 1 ];
+
+
+
+
+
    }
 
-   bool ibc_plugin_impl::head_catched_up() {
-      auto head_block_time_point = fc::time_point( chain_plug->chain().fork_db_head_block_time() );
-      return head_block_time_point < fc::time_point::now() + fc::seconds(3) &&
-             head_block_time_point > fc::time_point::now() - fc::seconds(5);
+   void ibc_plugin_impl::ibc_token_contract_checker( ibc_heartbeat_message& msg ){
+
    }
 
-   void ibc_plugin_impl::ticker() {
-      keepalive_timer->expires_from_now (keepalive_interval);
-      keepalive_timer->async_wait ([this](boost::system::error_code ec) {
-         ticker ();
+   void ibc_plugin_impl::start_ibc_heartbeat_timer() {
+      ibc_chain_contract_checker();
+      ibc_heartbeat_timer->expires_from_now (ibc_heartbeat_interval);
+      ibc_heartbeat_timer->async_wait ([this](boost::system::error_code ec) {
+         start_ibc_heartbeat_timer();
          if (ec) {
-            wlog ("Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
-         }
-         for (auto &c : connections ) {
-            if (c->socket->is_open()) {
-               c->send_time();
-            }
+            wlog ("start_ibc_heartbeat_timer error: ${m}", ("m", ec.message()));
          }
       });
-   }
-
-   void ibc_plugin_impl::start_monitors() {
-      connector_check.reset(new boost::asio::steady_timer( app().get_io_service()));
-      ibc_heartbeat_timer.reset(new boost::asio::steady_timer( app().get_io_service()));
-      chain_check.reset(new boost::asio::steady_timer( app().get_io_service()));
-
-      start_conn_timer(connector_period, std::weak_ptr<connection>());
-      start_ibc_heartbeat_timer();
-      start_chain_timer();
    }
 
    void ibc_plugin_impl::connection_monitor(std::weak_ptr<connection> from_connection) {
@@ -1992,33 +1991,40 @@ namespace eosio { namespace ibc {
       start_conn_timer(connector_period, std::weak_ptr<connection>());
    }
 
-   void ibc_plugin_impl::close( connection_ptr c ) {
-      if( c->peer_addr.empty( ) && c->socket->is_open() ) {
-         if (num_clients == 0) {
-            fc_wlog( logger, "num_clients already at 0");
+   void ibc_plugin_impl::start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection) {
+      connector_check->expires_from_now( du);
+      connector_check->async_wait( [this, from_connection](boost::system::error_code ec) {
+         if( !ec) {
+            connection_monitor(from_connection);
          }
          else {
-            --num_clients;
+            elog( "Error from connection check monitor: ${m}",( "m", ec.message()));
+            start_conn_timer( connector_period, std::weak_ptr<connection>());
          }
-      }
-      c->close();
+      });
    }
 
-   void ibc_plugin_impl::accepted_block_header(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+   void ibc_plugin_impl::start_monitors() {
+      connector_check.reset(new boost::asio::steady_timer( app().get_io_service()));
+      start_conn_timer(connector_period, std::weak_ptr<connection>());
+
+      ibc_heartbeat_timer.reset(new boost::asio::steady_timer( app().get_io_service()));
+      start_ibc_heartbeat_timer();
    }
 
-   void ibc_plugin_impl::accepted_block(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
-   }
-
-   void ibc_plugin_impl::irreversible_block(const block_state_ptr&block) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
-      // 每小时记录一个blockmroot
-   }
-
-   void ibc_plugin_impl::accepted_confirmation(const header_confirmation& head) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", head.block_id));
+   void ibc_plugin_impl::ticker() {
+      keepalive_timer->expires_from_now (keepalive_interval);
+      keepalive_timer->async_wait ([this](boost::system::error_code ec) {
+         ticker ();
+         if (ec) {
+            wlog ("Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
+         }
+         for (auto &c : connections ) {
+            if (c->socket->is_open()) {
+               c->send_time();
+            }
+         }
+      });
    }
 
    bool ibc_plugin_impl::authenticate_peer(const handshake_message& msg) const {
@@ -2095,10 +2101,6 @@ namespace eosio { namespace ibc {
          if( c->peer_addr == host ) return c;
       return connection_ptr();
    }
-
-   uint16_t ibc_plugin_impl::to_protocol_version (uint16_t v) {
-         return v;
-   }
    
    //--------------- handshake_initializer ---------------
 
@@ -2150,7 +2152,6 @@ namespace eosio { namespace ibc {
    }
 
 
-
    //--------------- ibc_plugin ---------------
 
    ibc_plugin::ibc_plugin()
@@ -2163,27 +2164,32 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin::set_program_options( options_description& /*cli*/, options_description& cfg )
    {
-      auto default_priv_key = private_key_type::regenerate<fc::ecc::private_key_shim>(fc::sha256::hash(std::string("nathan")));
-
       cfg.add_options()
          ( "ibc-listen-endpoint", bpo::value<string>()->default_value( "0.0.0.0:5678" ), "The actual host:port used to listen for incoming ibc connections.")
          ( "ibc-server-address", bpo::value<string>(), "An externally accessible host:port for identifying this node. Defaults to ibc-listen-endpoint.")
+         ( "ibc-sidechain-id", bpo::value<string>(), "The sidechain's chain id")
          ( "ibc-peer-address", bpo::value< vector<string> >()->composing(), "The public endpoint of a peer node to connect to. Use multiple ibc-peer-address options as needed to compose a network.")
          ( "ibc-max-nodes-per-host", bpo::value<int>()->default_value(def_max_nodes_per_host), "Maximum number of client nodes from any single IP address")
-         ( "ibc-agent-name", bpo::value<string>()->default_value("\"BOS IBC Agent\""), "The name supplied to identify this node amongst the peers.")
          ( "ibc-allowed-connection", bpo::value<vector<string>>()->multitoken()->default_value({"any"}, "any"), "Can be 'any' or 'specified' or 'none'. If 'specified', peer-key must be specified at least once.")
          ( "ibc-peer-key", bpo::value<vector<string>>()->composing()->multitoken(), "Optional public key of peer allowed to connect.  May be used multiple times.")
-//         ( "ibc-peer-private-key", bpo::value<vector<string>>()->composing()->multitoken(), "Tuple of [PublicKey, Private key] (may specify multiple times)")
-         ( "ibc-peer-private-key", boost::program_options::value<vector<string>>()->composing()->multitoken()->default_value({std::string(default_priv_key.get_public_key()) + "=KEY:" + std::string(default_priv_key)}, std::string(default_priv_key.get_public_key()) + "=KEY:" + std::string(default_priv_key)),
+         ( "ibc-agent-name", bpo::value<string>()->default_value("\"EOSIO IBC Agent\""), "The name supplied to identify this node amongst the peers.")
+         ( "ibc-peer-private-key", bpo::value<vector<string>>()->composing()->multitoken(),
            "Key=Value pairs in the form <public-key>=KEY:<private-key>\n"
            "   <public-key>   \tis a string form of a vaild EOSIO public key\n\n"
            "   <private-key>  \tis a string form of a valid EOSIO private key which maps to the provided public key\n\n")
          ( "ibc-max-clients", bpo::value<int>()->default_value(def_max_clients), "Maximum number of clients from which connections are accepted, use 0 for no limit")
-         ( "ibc-connection-cleanup-period", bpo::value<int>()->default_value(def_conn_retry_wait), "number of seconds to wait before cleaning up dead connections")
-         ( "ibc-max-cleanup-time-msec", bpo::value<int>()->default_value(10), "max connection cleanup time per cleanup call in millisec")
+         ( "ibc-connection-cleanup-period", bpo::value<int>()->default_value(def_conn_retry_wait), "Number of seconds to wait before cleaning up dead connections")
+         ( "ibc-max-cleanup-time-msec", bpo::value<int>()->default_value(10), "Maximum connection cleanup time per cleanup call in millisec")
          ( "ibc-version-match", bpo::value<bool>()->default_value(false), "True to require exact match of ibc plugin version.")
-         ( "ibc-sidechain-id", bpo::value<string>(), "the sidechain's chain id")
-         ( "ibc-chain-contract", bpo::value<string>(), "the name of this chain's ibc chain contract")
+
+         ( "ibc-chain-contract", bpo::value<string>(), "Name of this chain's ibc chain contract")
+         ( "ibc-token-contract", bpo::value<string>(), "Name of this chain's ibc token contract")
+         ( "ibc-relay-name", bpo::value<string>(), "ID of relay controlled by this node (e.g. relayone)")
+         ( "ibc-relay-private-key", bpo::value<string>(),
+           "Key=Value pairs in the form <public-key>=KEY:<private-key>\n"
+           "   <public-key>   \tis a string form of a vaild EOSIO public key\n\n"
+           "   <private-key>  \tis a string form of a valid EOSIO private key which maps to the provided public key\n\n")
+
          ( "ibc-log-format", bpo::value<string>()->default_value( "[\"${_name}\" ${_ip}:${_port}]" ),
            "The string used to format peers when logging messages about them.  Variables are escaped with ${<variable name>}.\n"
            "Available Variables:\n"
@@ -2202,6 +2208,8 @@ namespace eosio { namespace ibc {
       return fc::json::from_string(s).as<T>();
    }
 
+#define OPTION_ASSERT( option ) EOS_ASSERT( options.count( option ) && options.at( option ).as<string>() != string(), chain::plugin_config_exception, option " not specified" );
+
    void ibc_plugin::plugin_initialize( const variables_map& options ) {
       ilog("Initialize ibc plugin");
       try {
@@ -2209,16 +2217,45 @@ namespace eosio { namespace ibc {
 
          my->network_version_match = options.at( "ibc-version-match" ).as<bool>();
 
-         
-         EOS_ASSERT( options.count( "ibc-sidechain-id" ) && options.at("ibc-sidechain-id").as<string>() != string(),
-            chain::plugin_config_exception, "ibc-sidechain-id not specified" );
+         OPTION_ASSERT( "bc-sidechain-id" )
          my->sidechain_id = fc::sha256( options.at( "ibc-sidechain-id" ).as<string>() );
          ilog( "ibc sidechain id is ${id}", ("id",  my->sidechain_id.str()));
 
-         EOS_ASSERT( options.count( "ibc-chain-contract" ) && options.at("ibc-chain-contract").as<string>() != string(),
-            chain::plugin_config_exception, "ibc-chain-contract not specified" );
+         OPTION_ASSERT( "ibc-chain-contract" )
          my->chain_contract.reset( new ibc_chain_contract( eosio::chain::name{ options.at("ibc-chain-contract").as<string>()}));
          ilog( "ibc chain contract account is ${name}", ("name",  options.at("ibc-chain-contract").as<string>()));
+
+         OPTION_ASSERT( "ibc-token-contract" )
+         my->token_contract.reset( new ibc_token_contract( eosio::chain::name{ options.at("ibc-token-contract").as<string>()}));
+         ilog( "ibc token contract account is ${name}", ("name",  options.at("ibc-token-contract").as<string>()));
+
+         OPTION_ASSERT( "ibc-relay-name" )
+         my->relay = eosio::chain::name{ options.at("ibc-relay-name").as<string>() };
+         ilog( "ibc relay account is ${name}", ("name",  options.at("ibc-relay-name").as<string>()));
+
+         auto get_key = [=]( string key_spec_pair ) -> std::tuple<public_key_type,private_key_type> {
+            auto delim = key_spec_pair.find("=");
+            EOS_ASSERT(delim != std::string::npos, plugin_config_exception, "Missing \"=\" in the key spec pair");
+            auto pub_key_str = key_spec_pair.substr(0, delim);
+            auto spec_str = key_spec_pair.substr(delim + 1);
+
+            auto spec_delim = spec_str.find(":");
+            EOS_ASSERT(spec_delim != std::string::npos, plugin_config_exception, "Missing \":\" in the key spec pair");
+            auto spec_type_str = spec_str.substr(0, spec_delim);
+            auto spec_data = spec_str.substr(spec_delim + 1);
+
+            return std::make_tuple( public_key_type(pub_key_str), private_key_type(spec_data) );
+         };
+
+         OPTION_ASSERT( "ibc-relay-private-key" )
+         const auto& key_spec_pair = options.at("ibc-relay-private-key").as<string>();
+         try {
+            public_key_type pub_key;
+            auto [ pub_key, my->relay_private_key ] = get_key( key_spec_pair );
+            ilog( "ibc relay public key is ${key}", ("key", pub_key));
+         } catch (...) {
+            EOS_ASSERT( false, chain::plugin_config_exception, "Malformed ibc-relay-private-key: \"${val}\"", ("val", key_spec_pair));
+         }
 
          my->connector_period = std::chrono::seconds( options.at( "ibc-connection-cleanup-period" ).as<int>());
          my->max_cleanup_time_ms = options.at("ibc-max-cleanup-time-msec").as<int>();
@@ -2285,31 +2322,14 @@ namespace eosio { namespace ibc {
             }
          }
 
-//         if( options.count( "ibc-peer-private-key" )) {
-//            const std::vector<std::string> key_id_to_pri_pair_strings = options["ibc-peer-private-key"].as<std::vector<std::string>>();
-//            for( const std::string& key_id_to_pri_pair_string : key_id_to_pri_pair_strings ) {
-//               auto key_id_to_pri_pair = dejsonify<std::pair<chain::public_key_type, std::string>>( key_id_to_pri_pair_string );
-//               my->private_keys[key_id_to_pri_pair.first] = private_key_type( key_id_to_pri_pair.second );
-//            }
-//         }
-
-         if( options.count("ibc-peer-private-key") ) {
+         if( options.count("ibc-peer_private-key") ) {
             const std::vector<std::string> key_spec_pairs = options["ibc-peer-private-key"].as<std::vector<std::string>>();
             for (const auto& key_spec_pair : key_spec_pairs) {
                try {
-                  auto delim = key_spec_pair.find("=");
-                  EOS_ASSERT(delim != std::string::npos, plugin_config_exception, "Missing \"=\" in the key spec pair");
-                  auto pub_key_str = key_spec_pair.substr(0, delim);
-                  auto spec_str = key_spec_pair.substr(delim + 1);
-
-                  auto spec_delim = spec_str.find(":");
-                  EOS_ASSERT(spec_delim != std::string::npos, plugin_config_exception, "Missing \":\" in the key spec pair");
-                  auto spec_type_str = spec_str.substr(0, spec_delim);
-                  auto spec_data = spec_str.substr(spec_delim + 1);
-
-                  auto pubkey = public_key_type(pub_key_str);
-
-                  my->private_keys[pubkey] = private_key_type(spec_data);
+                  public_key_type pubkey;
+                  private_key_type prikey;
+                  auto [ pub_key, pri_key ] = get_key( key_spec_pair );
+                  my->private_keys[pubkey] = prikey;
                } catch (...) {
                   elog("Malformed ibc-peer-private-key: \"${val}\", ignoring!", ("val", key_spec_pair));
                }
@@ -2344,7 +2364,6 @@ namespace eosio { namespace ibc {
       chain::controller&cc = my->chain_plug->chain();
       cc.irreversible_block.connect( boost::bind(&ibc_plugin_impl::irreversible_block, my.get(), _1));
 
-      my->chain_contract->get_basic_info();
       my->start_monitors();
 
       for( auto seed_node : my->supplied_peers ) {

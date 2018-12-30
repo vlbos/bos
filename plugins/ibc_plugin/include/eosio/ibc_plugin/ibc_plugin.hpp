@@ -69,6 +69,10 @@ namespace eosio { namespace ibc {
       public_key_type            block_signing_key;
    };
 
+   struct blockroot_merkle_type {
+      uint64_t            block_num;
+      incremental_merkle  merkle;
+   };
 
    // ---- ibc.chain contract action related structs ----
    struct new_section_params {
