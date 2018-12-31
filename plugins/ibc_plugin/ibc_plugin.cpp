@@ -63,11 +63,14 @@ namespace eosio { namespace ibc {
    using socket_ptr = std::shared_ptr<tcp::socket>;
    using ibc_message_ptr = shared_ptr<ibc_message>;
 
+   struct by_block_num;
+   struct by_trx_id;
+
    typedef multi_index_container<
          ibc_trx_rich_info,
          indexed_by<
                ordered_unique<
-                     tag< by_table_id >,
+                     tag< by_id >,
                      member < ibc_trx_rich_info,
                            uint64_t,
                            &ibc_trx_rich_info::table_id > >,
@@ -484,10 +487,10 @@ namespace eosio { namespace ibc {
          if ( lower != upper ){
             const key_value_object& first = *lower;
             const key_value_object& last = *(--upper);
-            return std::make_tuple{ first.primary_key, last.primary_key };
+            return std::make_pair( first.primary_key, last.primary_key );
          }
       }
-      return std::make_tuple{ 0, 0 };
+      return std::make_pair( 0, 0 );
    }
 
    optional<key_value_object>  get_singleton_kvo( const name& code, const name& scope, const name& table ) {
@@ -596,11 +599,11 @@ namespace eosio { namespace ibc {
       void blockmerkle( const blockroot_merkle_type& data );
 
       // tables
-      optional<section_type> get_sections_tb_reverse_nth_section( uint64_t nth = 0 );
-      optional<block_header_state_type> get_chaindb_tb_bhs_by_block_num( uint64_t num );
-      block_id_type get_chaindb_tb_block_id_by_block_num( uint64_t num );
-      optional<global_state_ibc_chain> get_global_singleton();
-      void get_blkrtmkls_tb();
+      optional<section_type> get_sections_tb_reverse_nth_section( uint64_t nth = 0 ) const;
+      optional<block_header_state_type> get_chaindb_tb_bhs_by_block_num( uint64_t num ) const;
+      block_id_type get_chaindb_tb_block_id_by_block_num( uint64_t num ) const;
+      optional<global_state_ibc_chain> get_global_singleton() const;
+      void get_blkrtmkls_tb() ;
 
       // other
       bool has_contract() const;
@@ -617,7 +620,7 @@ namespace eosio { namespace ibc {
    }
 
    bool ibc_chain_contract::lwc_initialized() const {
-      auto ret = get_sections_tb_reverse_nth_section();
+      const auto& ret = get_sections_tb_reverse_nth_section();
       if ( ret.valid() ){
          return true;
       }
@@ -648,7 +651,7 @@ namespace eosio { namespace ibc {
       return false;
    }
 
-   optional<section_type> ibc_chain_contract::get_sections_tb_reverse_nth_section( uint64_t nth ){
+   optional<section_type> ibc_chain_contract::get_sections_tb_reverse_nth_section( uint64_t nth ) const {
       auto p = get_table_nth_row_kvo_by_primary_key( account, account, N(sections), nth, true );
       if ( p.valid() ){
          auto obj = *p;
@@ -660,7 +663,7 @@ namespace eosio { namespace ibc {
       return optional<section_type>();
    }
 
-   optional<block_header_state_type> ibc_chain_contract::get_chaindb_tb_bhs_by_block_num( uint64_t num ){
+   optional<block_header_state_type> ibc_chain_contract::get_chaindb_tb_bhs_by_block_num( uint64_t num ) const {
       chain_apis::read_only::get_table_rows_params par;
       par.json = true;  // must be true
       par.code = account;
@@ -682,7 +685,7 @@ namespace eosio { namespace ibc {
       return optional<block_header_state_type>();
    }
 
-   block_id_type ibc_chain_contract::get_chaindb_tb_block_id_by_block_num( uint64_t num ){
+   block_id_type ibc_chain_contract::get_chaindb_tb_block_id_by_block_num( uint64_t num ) const {
       auto p = get_chaindb_tb_bhs_by_block_num( num );
       if ( p.valid() ){
          return p->block_id;
@@ -690,7 +693,7 @@ namespace eosio { namespace ibc {
       return block_id_type();
    }
 
-   optional<global_state_ibc_chain> ibc_chain_contract::get_global_singleton(){
+   optional<global_state_ibc_chain> ibc_chain_contract::get_global_singleton() const {
       auto p = get_singleton_kvo( account, account, N(global) );
       if ( p.valid() ){
          auto obj = *p;
@@ -702,7 +705,7 @@ namespace eosio { namespace ibc {
       return optional<global_state_ibc_chain>();
    }
 
-   void ibc_chain_contract::get_blkrtmkls_tb(){
+   void ibc_chain_contract::get_blkrtmkls_tb() {
       const auto& d = app().get_plugin<chain_plugin>().chain().db();
       const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(account, account, N(blkrtmkls)));
       if (t_id != nullptr) {
@@ -1577,7 +1580,7 @@ namespace eosio { namespace ibc {
 //            c->enqueue( go_away_message(go_away_reason::wrong_chain) );
 //            return;
 //         }
-         c->protocol_version = to_protocol_version(msg.network_version);
+         c->protocol_version = msg.network_version;
          if(c->protocol_version != net_version) {
             if (network_version_match) {
                elog("Peer network version does not match expected ${nv} but got ${mnv}",
@@ -1658,7 +1661,8 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg) {
       peer_ilog(c, "received ibc_heartbeat_message");
 
-      if ( msg.state == deployed ) {
+      // handle ibc_chain_state and lwcls
+      if ( msg.ibc_chain_state == deployed ) {
          // send lwc_init_message
          controller &cc = chain_plug->chain();
          uint32_t head_num = cc.fork_db_head_block_num();
@@ -1688,33 +1692,83 @@ namespace eosio { namespace ibc {
 
          ilog("send lwc_init_message");
          c->enqueue( msg, true);
-         return;
-      }
-
-      // validate msg
-      auto check_id = [=]( uint32_t block_num, block_id_type id ) -> bool {
-         auto ret_id = my_impl->chain_plug->chain().get_block_id_for_num( block_num );
-         return ret_id == id;
-      };
-
-      if ( check_id( msg.ls.first_num, msg.ls.first_id ) &&
-      check_id( msg.ls.lib_num, msg.ls.lib_id ) &&
-      check_id( msg.ls.last_num, msg.ls.last_id )){
-         c->lwcls_info = msg.ls;
-         c->lwcls_info_update_time = fc::time_point::now();
       } else {
-         c->lwcls_info = lwc_section_type();
-         c->lwcls_info_update_time = fc::time_point();
-         elog("received ibc_heartbeat_message not correct");
-         idump((msg.ls));
+         // validate msg
+         auto check_id = [=](uint32_t block_num, block_id_type id) -> bool {
+            auto ret_id = my_impl->chain_plug->chain().get_block_id_for_num(block_num);
+            return ret_id == id;
+         };
+
+         bool valid = false;
+         if (check_id(msg.lwcls.first_num, msg.lwcls.first_id)) {
+            if (msg.lwcls.valid) {
+               if (check_id(msg.lwcls.first_num, msg.lwcls.first_id)) {
+                  valid = true;
+               } else {
+                  valid = false;
+               }
+            }
+            valid = true;
+         }
+
+         if ( valid ) {
+            c->lwcls_info = msg.lwcls;
+            c->lwcls_info_update_time = fc::time_point::now();
+         } else {
+            c->lwcls_info = lwc_section_type();
+            c->lwcls_info_update_time = fc::time_point();
+            elog("received ibc_heartbeat_message not correct");
+            idump((msg.lwcls));
+         }
       }
+
+      // check origtrxs_table_id_range
+//      if ( local_origtrxs.begin() == local_origtrxs.end() ){
+//
+//      }
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//
+//      uint64_t local_first = 0, local_last = 0, remote_firest, remote_last;
+//      if ( local_origtrxs.begin() != local_origtrxs.end() ){
+//         local_first = local_origtrxs.begin()->table_id;
+//         local_last = local_origtrxs.rbegin()->table_id;
+//      }
+//      auto [ remote_first, remote_last ] = msg.origtrxs_table_id_range;
+//
+//
+//
+
+
+
+
+
+
+
+
+
+
+
+
+
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_init_message &msg) {
       peer_ilog(c, "received lwc_init_message");
 
       chain_contract->get_contract_state();
-      if ( contract_state == deployed && chain_contract->lib_depth_valid() ){
+      if ( chain_contract->state == deployed && chain_contract->lib_depth_valid() ){
          chain_contract->chain_init( msg );
       }
    }
@@ -1757,7 +1811,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data_message &msg) {
       peer_ilog(c, "received lwc_section_data_message");
 
-      auto p = contract->get_sections_tb_reverse_nth_section();
+      auto p = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !p.valid() ){
          return;
       }
@@ -1768,23 +1822,23 @@ namespace eosio { namespace ibc {
          new_section_params par;
          par.headers = msg.headers;
          par.blockroot_merkle = msg.blockroot_merkle;
-         contract->newsection( par );
+//         chain_contract->newsection( par );
          return;
       }
 
-      if ( obj.valid && msg.headers.rbegin()->block_num() <= obj.last - contract->lwc_lib_depth ){ // nothing to do
+      if ( obj.valid && msg.headers.rbegin()->block_num() <= obj.last - chain_contract->lwc_lib_depth ){ // nothing to do
          return;
       }
 
       // find the first block number, which id is same in msg and lwc chaindb.
       uint32_t check_num_first = std::min( uint32_t(obj.last), msg.headers.rbegin()->block_num() );
-      uint32_t check_num_last = std::max( uint32_t(obj.valid ? obj.last - contract->lwc_lib_depth : obj.first)
+      uint32_t check_num_last = std::max( uint32_t(obj.valid ? obj.last - chain_contract->lwc_lib_depth : obj.first)
             , msg.headers.front().block_num() );
       uint32_t identical_num = 0;
       uint32_t check_num = check_num_first;
       while ( check_num >= check_num_last ){
          auto id_from_msg = msg.headers[ check_num - msg.headers.front().block_num()].id();
-         auto id_from_lwc = contract->get_chaindb_tb_block_id_by_block_num( check_num );
+         auto id_from_lwc = chain_contract->get_chaindb_tb_block_id_by_block_num( check_num );
          if ( id_from_lwc != block_id_type() && id_from_msg == id_from_lwc ){
             identical_num = check_num;
             break;
@@ -1806,7 +1860,7 @@ namespace eosio { namespace ibc {
       if ( msg.headers.rbegin()->block_num() - identical_num > 50 ){ // max block header per time
          last_itr = first_itr + 50;
       }
-      contract->addheaders( std::vector<signed_block_header>(first_itr, last_itr) );
+//      chain_contract->addheaders( std::vector<signed_block_header>(first_itr, last_itr) );
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_request_message &msg) {
@@ -1926,28 +1980,29 @@ namespace eosio { namespace ibc {
             auto obj = *p;
             lwc_section_type ls;
             ls.first_num = obj.first;
-            ls.first_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.first_num );
+            ls.first_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.lwcls.first_num );
             ls.last_num = obj.last;
-            ls.last_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.last_num );
+            ls.last_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.lwcls.last_num );
             if (  obj.last - chain_contract->lwc_lib_depth >= obj.first ){
                ls.lib_num = obj.last - chain_contract->lwc_lib_depth;
-               ls.lib_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.ls.lib_num );
+               ls.lib_id = chain_contract->get_chaindb_tb_block_id_by_block_num( msg.lwcls.lib_num );
             } else {
                ls.lib_num = 0;
                ls.lib_id = block_id_type();
             }
             ls.valid = obj.valid;
+
+            msg.lwcls = ls;
          }
 
          msg.ibc_chain_state = chain_contract->state;
-         msg.lwcls = ls;
    }
 
    // get two table info
    void ibc_plugin_impl::ibc_token_contract_checker( ibc_heartbeat_message& msg ){
       msg.ibc_token_state = token_contract->state;
-      msg.origtrxs_table_id_range = get_table_origtrxs_id_range();
-      msg.cashtrxs_table_seq_num_range = get_table_cashtrxs_seq_num_range();
+      msg.origtrxs_table_id_range = token_contract->get_table_origtrxs_id_range();
+      msg.cashtrxs_table_seq_num_range = token_contract->get_table_cashtrxs_seq_num_range();
    }
 
    void ibc_plugin_impl::start_ibc_heartbeat_timer() {
@@ -2235,7 +2290,7 @@ namespace eosio { namespace ibc {
          my->relay = eosio::chain::name{ options.at("ibc-relay-name").as<string>() };
          ilog( "ibc relay account is ${name}", ("name",  options.at("ibc-relay-name").as<string>()));
 
-         auto get_key = [=]( string key_spec_pair ) -> std::tuple<public_key_type,private_key_type> {
+         auto get_key = [=]( string key_spec_pair ) -> std::pair<public_key_type,private_key_type> {
             auto delim = key_spec_pair.find("=");
             EOS_ASSERT(delim != std::string::npos, plugin_config_exception, "Missing \"=\" in the key spec pair");
             auto pub_key_str = key_spec_pair.substr(0, delim);
@@ -2246,15 +2301,15 @@ namespace eosio { namespace ibc {
             auto spec_type_str = spec_str.substr(0, spec_delim);
             auto spec_data = spec_str.substr(spec_delim + 1);
 
-            return std::make_tuple( public_key_type(pub_key_str), private_key_type(spec_data) );
+            return std::make_pair( public_key_type(pub_key_str), private_key_type(spec_data) );
          };
 
          OPTION_ASSERT( "ibc-relay-private-key" )
          const auto& key_spec_pair = options.at("ibc-relay-private-key").as<string>();
          try {
-            public_key_type pub_key;
-            auto [ pub_key, my->relay_private_key ] = get_key( key_spec_pair );
-            ilog( "ibc relay public key is ${key}", ("key", pub_key));
+            auto key = get_key( key_spec_pair );
+            my->relay_private_key = key.second;
+            ilog( "ibc relay public key is ${key}", ("key", key.first));
          } catch (...) {
             EOS_ASSERT( false, chain::plugin_config_exception, "Malformed ibc-relay-private-key: \"${val}\"", ("val", key_spec_pair));
          }
@@ -2328,10 +2383,8 @@ namespace eosio { namespace ibc {
             const std::vector<std::string> key_spec_pairs = options["ibc-peer-private-key"].as<std::vector<std::string>>();
             for (const auto& key_spec_pair : key_spec_pairs) {
                try {
-                  public_key_type pubkey;
-                  private_key_type prikey;
-                  auto [ pub_key, pri_key ] = get_key( key_spec_pair );
-                  my->private_keys[pubkey] = prikey;
+                  auto key = get_key( key_spec_pair );
+                  my->private_keys[key.first] = key.second;
                } catch (...) {
                   elog("Malformed ibc-peer-private-key: \"${val}\", ignoring!", ("val", key_spec_pair));
                }

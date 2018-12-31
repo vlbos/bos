@@ -133,8 +133,8 @@ namespace eosio { namespace ibc {
    struct cash_action_params {
       uint64_t                               seq_num;
       uint32_t                               orig_trx_block_num;
-      std::vector<char>&                     orig_trx_packed_trx_receipt;
-      std::vector<digest_type>&              orig_trx_merkle_path;
+      std::vector<char>                      orig_trx_packed_trx_receipt;
+      std::vector<digest_type>               orig_trx_merkle_path;
       transaction_id_type                    orig_trx_id;    // redundant, facilitate indexing and checking
       name                                   to;             // redundant, facilitate indexing and checking
       asset                                  quantity;       // redundant, facilitate indexing and checking
@@ -144,8 +144,8 @@ namespace eosio { namespace ibc {
 
    struct cashconfirm_action_params {
       uint32_t                               cash_trx_block_num;
-      std::vector<char>&                     cash_trx_packed_trx_receipt;
-      std::vector<digest_type>&              cash_trx_merkle_path;
+      std::vector<char>                      cash_trx_packed_trx_receipt;
+      std::vector<digest_type>               cash_trx_merkle_path;
       transaction_id_type                    cash_trx_id;   // redundant, facilitate indexing and checking
       transaction_id_type                    orig_trx_id;
    };
@@ -159,8 +159,8 @@ FC_REFLECT( eosio::ibc::global_state_ibc_chain, (lib_depth) )
 FC_REFLECT( eosio::ibc::section_type, (first)(last)(np_num)(valid)(producers)(block_nums) )
 FC_REFLECT( eosio::ibc::new_section_params, (headers)(blockroot_merkle) )
 FC_REFLECT( eosio::ibc::block_header_state_type, (block_num)(block_id)(header)(active_schedule_id)(pending_schedule_id)(blockroot_merkle)(block_signing_key) )
-FC_REFLECT( eosio::ibc::ibctrx_info, (id)(block_time_slot)(trx_id)(from)(to)(quantity)(memo)(dest_trx_id)(state) )
-FC_REFLECT( eosio::ibc::remote_local_trx_info, (id)(r_trx_id)(r_from)(r_to)(r_quantity)(r_memo)(l_trx_id)(l_from)(l_to)(l_quantity)(l_memo) )
+FC_REFLECT( eosio::ibc::blockroot_merkle_type, (block_num)(merkle) )
+
 
 FC_REFLECT( eosio::ibc::transfer_action_type, (from)(to)(quantity)(memo) )
 FC_REFLECT( eosio::ibc::transfer_action_info, (contract)(action)(from)(quantity) )
@@ -170,7 +170,4 @@ FC_REFLECT( eosio::ibc::original_trx_info, (id)(block_time_slot)(trx_id)(action)
 FC_REFLECT( eosio::ibc::cash_trx_info, (seq_num)(block_time_slot)(trx_id)(action)(orig_trx_id)(orig_trx_block_num) )
 FC_REFLECT( eosio::ibc::cash_action_params, (seq_num)(orig_trx_block_num)(orig_trx_packed_trx_receipt)(orig_trx_merkle_path)(orig_trx_id)(to)(quantity)(memo)(relay) )
 FC_REFLECT( eosio::ibc::cashconfirm_action_params, (cash_trx_block_num)(cash_trx_packed_trx_receipt)(cash_trx_merkle_path)(cash_trx_id)(orig_trx_id) )
-
-
-
 

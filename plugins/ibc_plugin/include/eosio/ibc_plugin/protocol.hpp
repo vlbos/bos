@@ -135,8 +135,8 @@ namespace eosio {
          contract_state                   ibc_token_state;
          lwc_section_type                 lwcls;   ///< lwc last section info
 
-         std::tuple<uint64_t,uint64_t>    origtrxs_table_id_range;
-         std::tuple<uint64_t,uint64_t>    cashtrxs_table_seq_num_range;
+         std::pair<uint64_t,uint64_t>     origtrxs_table_id_range;
+         std::pair<uint64_t,uint64_t>     cashtrxs_table_seq_num_range;
          uint32_t                         new_producers_block_num; // the first new producers replacement range after lwcls's lib;
       };
 
