@@ -129,14 +129,17 @@ namespace eosio {
        * then, combine with new_producers_block_num, start to get block header for the mininum block number, to let it into lib of lwc section.
        * when required blocks enter the lib, push transactions of origtrxs and cashtrxs,
        */
+
+      type_def std::pair<uint64_t,uint64_t> range_type;
+
       struct ibc_heartbeat_message {
          ibc_heartbeat_message(): ibc_chain_state(none),ibc_token_state(none),lwcls(){}
          contract_state                   ibc_chain_state;
          contract_state                   ibc_token_state;
          lwc_section_type                 lwcls;   ///< lwc last section info
 
-         std::pair<uint64_t,uint64_t>     origtrxs_table_id_range;
-         std::pair<uint64_t,uint64_t>     cashtrxs_table_seq_num_range;
+         range_type                       origtrxs_table_id_range;
+         range_type                       cashtrxs_table_seq_num_range;
          uint32_t                         new_producers_block_num; // the first new producers replacement range after lwcls's lib;
       };
 
@@ -172,8 +175,7 @@ namespace eosio {
 
       struct ibc_trxs_request_message {
          name        table;
-         uint64_t    start_id;
-         uint64_t    end_id;
+         range_type  range;
       };
 
       struct ibc_trxs_data_message {
@@ -210,7 +212,7 @@ FC_REFLECT( eosio::ibc::lwc_init_message, (header)(active_schedule)(blockroot_me
 FC_REFLECT( eosio::ibc::lwc_section_request_message, (start_block_num)(end_block_num) )
 FC_REFLECT( eosio::ibc::lwc_section_data_message, (headers)(blockroot_merkle) )
 FC_REFLECT( eosio::ibc::ibc_trx_rich_info, (table_id)(block_num)(trx_id)(packed_trx_receipt)(merkle_path) )
-FC_REFLECT( eosio::ibc::ibc_trxs_request_message, (table)(start_id)(end_id) )
+FC_REFLECT( eosio::ibc::ibc_trxs_request_message, (table)(range) )
 FC_REFLECT( eosio::ibc::ibc_trxs_data_message, (table)(trxs_rich_info) )
 
 

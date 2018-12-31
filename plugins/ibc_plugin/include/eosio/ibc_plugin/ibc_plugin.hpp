@@ -70,6 +70,7 @@ namespace eosio { namespace ibc {
    };
 
    struct blockroot_merkle_type {
+      blockroot_merkle_type():block_num(0),merkle(){}
       uint64_t            block_num;
       incremental_merkle  merkle;
    };
