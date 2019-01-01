@@ -1873,8 +1873,6 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_request_message &msg) {
       peer_ilog(c, "received lwc_section_request_message");
 
-      return;
-
       if ( chain_plug->chain().head_block_num() - msg.start_block_num < MinDepth + MaxSectionLength ){
          ilog("return directly");
          return;
@@ -1933,7 +1931,6 @@ namespace eosio { namespace ibc {
          ++check_num;
          uint32_t tmp_end_num = std::min( start_num + MaxSectionLength, end_num );
          while ( check_num < tmp_end_num ){
-            ilog("======================");
             ret_msg.headers.push_back( *(chain_plug->chain().fetch_block_by_number( check_num )) );
             check_num += 1;
          }
@@ -1945,18 +1942,41 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data_message &msg) {
       peer_ilog(c, "received lwc_section_data_message");
 
+
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !p.valid() ){
          elog("can not get section info from ibc.chain contract");
          return;
       }
       section_type ls = *p;
-      if ( ls.valid && msg.headers.rbegin()->block_num() <= ls.last - chain_contract->lwc_lib_depth ){ // nothing to do
+
+      uint32_t msg_first_num = msg.headers.begin()->block_num();
+      uint32_t msg_last_num = msg.headers.rbegin()->block_num();
+
+      idump((msg_first_num)(msg_last_num)(ls));
+
+      if( msg_last_num <= ls.last && msg.headers.rbegin()->id() == chain_contract->get_chaindb_tb_block_id_by_block_num(msg_last_num) ){
+         ilog("lwc_section_data_message has no new data");
          return;
       }
 
-      if ( msg.headers.front().block_num() <= ls.last ) { // append directly
+#ifdef PLUGIN_TEST
+      if ( ls.last <= chain_contract->lwc_lib_depth ){
+         return;
+      }
+#endif
 
+      if ( ls.valid && msg_last_num <= std::max(ls.first, ls.last - chain_contract->lwc_lib_depth) ){
+         ilog("nothing to do");
+         return;
+      }
+
+      if ( msg_first_num == ls.last + 1 ){// append directly
+         ilog("append directly -----1------");
+         chain_contract->pushsection( msg );
+
+      } else if( msg_first_num <= ls.last ) { // find fit number then append directly
+         ilog("append directly ----2-------");
          // find the first block number, which id is same in msg and lwcls.
          uint32_t check_num_first = std::min( uint32_t(ls.last), msg.headers.rbegin()->block_num() );
          uint32_t check_num_last = std::max( uint32_t(ls.valid ? ls.last - chain_contract->lwc_lib_depth : ls.first), msg.headers.front().block_num() );
@@ -1971,6 +1991,9 @@ namespace eosio { namespace ibc {
             }
             --check_num;
          }
+
+         idump((identical_num));
+
          if ( identical_num == 0 ){
             if ( check_num == ls.first ){
                // delete lwcls ?
@@ -1990,9 +2013,11 @@ namespace eosio { namespace ibc {
          for ( auto it = first_itr; it != msg.headers.end(); ++it ){
             par.headers.push_back( *it );
          }
-         chain_contract->pushsection( par );
+         ilog("chain_contract->pushsection( par ); ====================");
+//         chain_contract->pushsection( par );
 
       } else { // store in local_sections
+         ilog("store in local_sections -----3-----");
          lwc_section_info  sctn;
          sctn.first = msg.headers.begin()->block_num();
          sctn.last = msg.headers.rbegin()->block_num();
