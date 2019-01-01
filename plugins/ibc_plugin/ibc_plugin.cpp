@@ -1792,7 +1792,7 @@ namespace eosio { namespace ibc {
 
          ilog("send lwc_init_message");
          c->enqueue( msg, true);
-      } else {
+      } else if ( msg.ibc_chain_state == working ){
          // validate msg
          auto check_id = [=](uint32_t block_num, block_id_type id) -> bool {
             auto ret_id = my_impl->chain_plug->chain().get_block_id_for_num(block_num);
@@ -1823,7 +1823,7 @@ namespace eosio { namespace ibc {
          ilog("msg ok ---- ");
       }
 
-
+      ilog("msg ok ---- return");
       return;
 
       // check origtrxs_table_id_range
@@ -1872,6 +1872,8 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_request_message &msg) {
       peer_ilog(c, "received lwc_section_request_message");
+
+      return;
 
       if ( chain_plug->chain().head_block_num() - msg.start_block_num < MinDepth + MaxSectionLength ){
          ilog("return directly");
@@ -2137,11 +2139,18 @@ namespace eosio { namespace ibc {
          return;
       }
 
+      uint32_t local_safe_head_num = chain_plug->chain().head_block_num() - MinDepth;
+
+      if ( lwcls.last_num >= local_safe_head_num ){
+         ilog("need not check");
+         return;
+      }
+
       block_header ls_last_header;
       block_header local_safe_header;
       try {
-         ls_last_header = *(chain_plug->chain().fetch_block_by_number( lwcls.last_num ));
-         local_safe_header = *(chain_plug->chain().fetch_block_by_number( chain_plug->chain().head_block_num() - 50 )); // 50=12*4+2
+         ls_last_header = *(chain_plug->chain().fetch_block_by_number(lwcls.last_num));
+         local_safe_header = *(chain_plug->chain().fetch_block_by_number(local_safe_head_num));
       } catch (...) {
          elog("fetch block by number failed");
          return;
@@ -2158,22 +2167,28 @@ namespace eosio { namespace ibc {
 
          search_first = ls_last_header;
          search_last = local_safe_header;
-         search_middle = get_block_header( ls_last_header.block_num() + ( search_last.block_num() - ls_last_header.block_num() ) / 2 );
+         search_middle = get_block_header( search_first.block_num() + ( search_last.block_num() - search_first.block_num() ) / 2 );
 
          while( !(search_first.schedule_version == ls_last_header.schedule_version &&
                   get_block_header( search_first.block_num() + 1 ).schedule_version == ls_last_header.schedule_version + 1 ) ){
             if ( search_middle.schedule_version != ls_last_header.schedule_version  ){
                search_last = search_middle;
-               search_middle = get_block_header( ls_last_header.block_num() + ( search_last.block_num() - ls_last_header.block_num() ) / 2 );
+               search_middle = get_block_header( search_first.block_num() + ( search_last.block_num() - search_first.block_num() ) / 2 );
             } else {
                search_first = search_middle;
-               search_middle = get_block_header( ls_last_header.block_num() + ( search_last.block_num() - ls_last_header.block_num() ) / 2 );
+               search_middle = get_block_header( search_first.block_num() + ( search_last.block_num() - search_first.block_num() ) / 2 );
             }
-            fc_ilog( logger, "---*---");
-         }
 
+            if ( search_last.block_num() - search_first.block_num() == 1 ){
+               elog("internel errror, can't find fit block num for the next schedule_version");
+               return;
+            }
+           ilog("---*---");
+         }
          msg.new_producers_block_num = search_first.block_num();
+         return;
       }
+      msg.new_producers_block_num = 0;
    }
 
    // get lwcls info
@@ -2207,16 +2222,28 @@ namespace eosio { namespace ibc {
       msg.ibc_token_state = token_contract->state;
       msg.origtrxs_table_id_range = token_contract->get_table_origtrxs_id_range();
       msg.cashtrxs_table_seq_num_range = token_contract->get_table_cashtrxs_seq_num_range();
+
+      idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range ));
    }
 
    void ibc_plugin_impl::start_ibc_heartbeat_timer() {
-      if ( should_send_ibc_heartbeat() ){
-         ibc_heartbeat_message msg;
-         chain_checker(msg);
-         ibc_chain_contract_checker(msg);
-         ibc_token_contract_checker(msg);
-         send_all( msg );
-      }
+
+      try {
+         if ( should_send_ibc_heartbeat() ){
+            ibc_heartbeat_message msg;
+            chain_checker(msg);
+            ibc_chain_contract_checker(msg);
+            ibc_token_contract_checker(msg);
+
+            for( auto &c : connections) {
+               if( c->current() ) {
+                  peer_ilog(c,"sending ibc_heartbeat_message");
+                  c->enqueue( msg );
+               }
+            }
+         }
+      } FC_LOG_AND_DROP()
+
 
       ibc_heartbeat_timer->expires_from_now (ibc_heartbeat_interval);
       ibc_heartbeat_timer->async_wait ([this](boost::system::error_code ec) {
@@ -2373,19 +2400,19 @@ namespace eosio { namespace ibc {
       // 获得lwcls
       auto opt_sctn = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !opt_sctn.valid() ){
-         elog("error");
+         elog("can not get lwcls");
          return;
       }
       section_type lwcls = *opt_sctn;
 
       // 首先根据 local_origtrxs local_cashtrxs new_prod_blk_nums 计算当前section的最小范围。
       uint32_t min_last_num = lwcls.first + chain_contract->lwc_lib_depth ;
-      if ( lwcls.np_num != 0  ){
+      if ( !(lwcls.np_num == 0 || lwcls.np_num > chain_plug->chain().head_block_num()) ){
          min_last_num = lwcls.np_num + 325 + chain_contract->lwc_lib_depth;
       }
 
-      auto it_orig_ = local_origtrxs.get<by_block_num>().lower_bound( lwcls.first );
-      auto it_orig = local_origtrxs.project<0>(it_orig_);
+      auto _it_orig = local_origtrxs.get<by_block_num>().lower_bound( lwcls.first );
+      auto it_orig = local_origtrxs.project<0>(_it_orig);
       while ( it_orig != local_origtrxs.end() && it_orig->block_num < min_last_num ){
          min_last_num = std::max( min_last_num, it_orig->block_num + chain_contract->lwc_lib_depth );
          ++it_orig;
@@ -2412,11 +2439,13 @@ namespace eosio { namespace ibc {
          for( auto &c : connections) {
             if( c->current() ) {
                peer_ilog(c,"sending lwc_section_request_message");
+               idump((msg));
                c->enqueue( msg );
             }
          }
       }
 
+      ilog("+++++++++++=============");
       return;
 
       //如果已经有进lib的区块，则开始发送local_origtrxs 和local_cashtrxs 中可以发送的交易。
@@ -2505,7 +2534,10 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_ibc_core_timer( ){
-      ibc_core_checker();
+      try {
+         ibc_core_checker();
+      } FC_LOG_AND_DROP()
+
       ibc_core_timer->expires_from_now( ibc_core_interval );
       ibc_core_timer->async_wait( [this](boost::system::error_code ec) {
          start_ibc_core_timer();
