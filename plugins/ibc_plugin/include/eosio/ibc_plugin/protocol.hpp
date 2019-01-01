@@ -130,7 +130,7 @@ namespace eosio {
        * when required blocks enter the lib, push transactions of origtrxs and cashtrxs,
        */
 
-      type_def std::pair<uint64_t,uint64_t> range_type;
+      typedef std::pair<uint64_t,uint64_t> range_type;
 
       struct ibc_heartbeat_message {
          ibc_heartbeat_message(): ibc_chain_state(none),ibc_token_state(none),lwcls(){}

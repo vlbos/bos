@@ -89,7 +89,7 @@ namespace eosio { namespace ibc {
    ibc_transaction_index;
 
    struct lwc_section_info {
-      uint32_t                   fisrt;
+      uint32_t                   first;
       uint32_t                   last;
       lwc_section_data_message   section_data;
    };
@@ -99,9 +99,9 @@ namespace eosio { namespace ibc {
          indexed_by<
                ordered_unique<
                      tag< by_id >,
-                     member < ibc_trx_rich_info,
-                           uint64_t,
-                           &ibc_trx_rich_info::fisrt > >
+                     member < lwc_section_info,
+                           uint32_t,
+                           &lwc_section_info::first > >
          >
    >
    ibc_section_index;
@@ -506,7 +506,7 @@ namespace eosio { namespace ibc {
       return optional<key_value_object>();
    }
 
-   std::tuple<uint64_t,uint64_t>  get_table_primary_key_range( const name& code, const name& scope, const name& table ) {
+   range_type get_table_primary_key_range( const name& code, const name& scope, const name& table ) {
       const auto& d = app().get_plugin<chain_plugin>().chain().db();
       const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(code, scope, table));
       if (t_id != nullptr) {
@@ -521,7 +521,7 @@ namespace eosio { namespace ibc {
             return std::make_pair( first.primary_key, last.primary_key );
          }
       }
-      return std::make_pair( 0, 0 );
+      return range_type();
    }
 
    optional<key_value_object>  get_singleton_kvo( const name& code, const name& scope, const name& table ) {
@@ -600,8 +600,8 @@ namespace eosio { namespace ibc {
       my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object( mvo(packed_transaction(trx)) ), next );
    }
 
-   void push_recurse(chain_apis::read_write* rw, int index, const std::make_shared<std::vector<signed_transaction>& params, bool allow_failure ) {
-      auto next = [=](const fc::static_variant<fc::exception_ptr, read_write::push_transaction_results>& result) {
+   void push_recurse(int index, const std::shared_ptr<std::vector<signed_transaction>>& params, bool allow_failure ) {
+      auto next = [=](const fc::static_variant<fc::exception_ptr, chain_apis::read_write::push_transaction_results>& result) {
          if (result.contains<fc::exception_ptr>()) {
             try {
                result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
@@ -618,18 +618,18 @@ namespace eosio { namespace ibc {
 
          int next_index = index + 1;
          if (next_index < params->size()) {
-            push_recurse(rw, next_index, params, results);
+            push_recurse( next_index, params, allow_failure );
          }
       };
 
-      rw->push_transaction( fc::variant_object(mvo(packed_transaction( params->at(index) ))), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction( params->at(index) ))), next );
    }
 
    void push_transactions( const std::vector<signed_transaction>& params, bool allow_failure ){
       try {
          EOS_ASSERT( params.size() <= 1000, too_many_tx_at_once, "Attempt to push too many transactions at once" );
          auto params_copy = std::make_shared<std::vector<signed_transaction>>(params.begin(), params.end());
-         push_recurse( my_impl->chain_plug->get_read_write_api(), 0, params_copy, allow_failure );
+         push_recurse( 0, params_copy, allow_failure );
       } FC_LOG_AND_DROP()
    }
 
@@ -846,9 +846,9 @@ namespace eosio { namespace ibc {
       void cashconfirm( const cashconfirm_action_params& p );
 
       // tables
-      std::tuple<uint64_t,uint64_t> get_table_origtrxs_id_range();
+      range_type get_table_origtrxs_id_range();
       optional<original_trx_info> get_table_origtrxs_trx_info_by_id( uint64_t id );
-      std::tuple<uint64_t,uint64_t> get_table_cashtrxs_seq_num_range();
+      range_type get_table_cashtrxs_seq_num_range();
       optional<cash_trx_info> get_table_cashtrxs_trx_info_by_seq_num( uint64_t seq_num );
       optional<global_state_ibc_token> get_global_state_singleton();
       optional<global_mutable_ibc_token> get_global_mutable_singleton();
@@ -878,7 +878,7 @@ namespace eosio { namespace ibc {
       }
    }
 
-   std::tuple<uint64_t,uint64_t> ibc_token_contract::get_table_origtrxs_id_range() {
+   range_type ibc_token_contract::get_table_origtrxs_id_range() {
       return get_table_primary_key_range( account, account, N(origtrxs) );
    }
 
@@ -904,7 +904,7 @@ namespace eosio { namespace ibc {
       return optional<original_trx_info>();
    }
 
-   std::tuple<uint64_t,uint64_t> ibc_token_contract::get_table_cashtrxs_seq_num_range() {
+   range_type ibc_token_contract::get_table_cashtrxs_seq_num_range() {
       return get_table_primary_key_range( account, account, N(cashtrxs) );
    }
 
@@ -1794,7 +1794,7 @@ namespace eosio { namespace ibc {
       // check origtrxs_table_id_range
       if ( msg.origtrxs_table_id_range != range_type() ){
          ibc_trxs_request_message request;
-         reqest.table = N(origtrxs);
+         request.table = N(origtrxs);
          if ( local_origtrxs.begin() == local_origtrxs.end() ){
             request.range = msg.origtrxs_table_id_range;
             send_all( request );
@@ -1806,15 +1806,15 @@ namespace eosio { namespace ibc {
       }
 
       // check cashtrxs_table_id_range
-      if ( msg.cashtrxs_table_id_range != range_type() ){
+      if ( msg.cashtrxs_table_seq_num_range != range_type() ){
          ibc_trxs_request_message request;
-         reqest.table = N(cashtrxs);
+         request.table = N(cashtrxs);
          if ( local_cashtrxs.begin() == local_cashtrxs.end() ){
-            request.range = msg.cashtrxs_table_id_range;
+            request.range = msg.cashtrxs_table_seq_num_range;
             send_all( request );
-         } else if ( local_cashtrxs.rbegin()->table_id < msg.casgtrxs_table_id_range.second ) {
-            request.range.first = std::max(  msg.cashtrxs_table_id_range.first, local_cashtrxs.rbegin()->table_id );
-            request.range.second = msg.cashtrxs_table_id_range.second;
+         } else if ( local_cashtrxs.rbegin()->table_id < msg.cashtrxs_table_seq_num_range.second ) {
+            request.range.first = std::max(  msg.cashtrxs_table_seq_num_range.first, local_cashtrxs.rbegin()->table_id );
+            request.range.second = msg.cashtrxs_table_seq_num_range.second;
             send_all( request );
          }
       }
@@ -1843,6 +1843,7 @@ namespace eosio { namespace ibc {
       }
 
       lwc_section_data_message ret_msg;
+      uint32_t pushed_num = msg.start_block_num;
 
       auto start_bsp = chain_plug->chain().fetch_block_state_by_number( msg.start_block_num );
       if ( start_bsp != block_state_ptr() ){
@@ -1853,14 +1854,14 @@ namespace eosio { namespace ibc {
          ilog("didn't find block_state of number ${n} in forkdb",("n",msg.start_block_num));
          chain_contract->get_blkrtmkls_tb();
          blockroot_merkle_type start_point;
-         for ( brm :chain_contract->history_blockroot_merkles ) {
+         for ( auto brm :chain_contract->history_blockroot_merkles ) {
             if ( brm.block_num <= msg.start_block_num ){
                start_point = brm;
             }
          }
          if ( start_point.block_num != 0 && msg.start_block_num - start_point.block_num <= 3600*2*24*2 ){ // 2 days
             while( start_point.block_num <= msg.start_block_num ){
-               start_point.merkle.append( chain_plug->chain().get_block_id_for_num( start_point.block_num ) )
+               start_point.merkle.append( chain_plug->chain().get_block_id_for_num( start_point.block_num ) );
                start_point.block_num += 1;
             }
             if (start_point.block_num == msg.start_block_num ){
@@ -1876,9 +1877,9 @@ namespace eosio { namespace ibc {
          }
       }
 
-      uint32_t pushed_num = msg.start_block_num;
+
       while ( pushed_num <= msg.end_block_num && pushed_num < chain_plug->chain().head_block_num() - 50 ){
-         ret_msg.headers.push_back( chain_plug->chain().fetch_block_by_number( pushed_num + 1 ) );
+         ret_msg.headers.push_back( *(chain_plug->chain().fetch_block_by_number( pushed_num + 1 )) );
          pushed_num += 1;
       }
 
@@ -1898,16 +1899,15 @@ namespace eosio { namespace ibc {
       }
 
       lwc_section_info  sctn;
-      sctn.fisrt = msg.headers.begin()->block_num();
+      sctn.first = msg.headers.begin()->block_num();
       sctn.last = msg.headers.rbegin()->block_num();
       sctn.section_data = msg;
 
-      auto it = local_sections.find( sctn.fisrt );
+      auto it = local_sections.find( sctn.first );
       if ( it == local_sections.end() ){
          local_sections.insert( sctn );
       } else if ( msg.headers.rbegin()->block_num() > it->last ) {
          local_sections.erase( it );
-         local_sections.erase( sctn );
       }
    }
 
@@ -1921,7 +1921,10 @@ namespace eosio { namespace ibc {
             auto p = token_contract->get_table_origtrxs_trx_info_by_id( id );
             if ( p.valid() ){
                original_trx_info trx_info = *p;
-               ibc_trx_rich_info rich_info = get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.id );
+
+               auto info_p =  get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.id );
+
+               ibc_trx_rich_info rich_info = *info_p;
                ret_msg.trxs_rich_info.push_back( rich_info );
             }
          }
@@ -1937,8 +1940,8 @@ namespace eosio { namespace ibc {
             auto p = token_contract->get_table_cashtrxs_trx_info_by_seq_num( id );
             if ( p.valid() ){
                cash_trx_info trx_info = *p;
-               ibc_trx_rich_info rich_info = get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.seq_num );
-               ret_msg.trxs_rich_info.push_back( rich_info );
+               auto rich_info = get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.seq_num );
+               ret_msg.trxs_rich_info.push_back( *rich_info );
             }
          }
          c->enqueue( ret_msg );
@@ -2197,7 +2200,7 @@ namespace eosio { namespace ibc {
       auto blk_ptr =  chain_plug->chain().fetch_block_by_number( trx_info.block_num );
       std::vector<digest_type>            trx_digests;
       std::vector<transaction_id_type>    trx_ids;
-      std::vector<char>                   packed_trx_receipt
+      std::vector<char>                   packed_trx_receipt;
 
       bool found = false;
       uint32_t found_num = 0;
@@ -2230,6 +2233,8 @@ namespace eosio { namespace ibc {
 
       trx_info.merkle_path = mp;
       trx_info.packed_trx_receipt = packed_trx_receipt;
+
+      return trx_info;
    }
 
    /**
@@ -2272,14 +2277,18 @@ namespace eosio { namespace ibc {
          min_last_num = lwcls.np_num + 325 + chain_contract->lwc_lib_depth;
       }
 
-      auto it_orig = local_origtrxs.get<by_block_num>().lower_bound( lwcls.first );
-      while ( it_orig != local_origtrx.end() && it_orig->block_num < min_last_num ){
+      auto it_orig_ = local_origtrxs.get<by_block_num>().lower_bound( lwcls.first );
+      auto it_orig = local_origtrxs.project<0>(it_orig_);
+      while ( it_orig != local_origtrxs.end() && it_orig->block_num < min_last_num ){
          min_last_num = std::max( min_last_num, it_orig->block_num + chain_contract->lwc_lib_depth );
+         ++it_orig;
       }
 
-      auto it_cash = local_cashtrxs.get<by_block_num>().lower_bound( lwcls.first );
-      while ( it_cash != local_cashtrx.end() && it_cash->block_num < min_last_num ){
+      auto it_cash_ = local_cashtrxs.get<by_block_num>().lower_bound( lwcls.first );
+      auto it_cash = local_cashtrxs.project<0>(it_cash_);
+      while ( it_cash != local_cashtrxs.end() && it_cash->block_num < min_last_num ){
          min_last_num = std::max( min_last_num, it_cash->block_num + chain_contract->lwc_lib_depth );
+         ++it_cash;
       }
 
       for ( const auto& num : new_prod_blk_nums ){
@@ -2314,7 +2323,8 @@ namespace eosio { namespace ibc {
             auto opt_cash = token_contract->get_table_cashtrxs_trx_info_by_seq_num( range.second );
             auto orig_trx_id = opt_cash->orig_trx_id;
 
-            auto it = local_origtrxs.get<by_trx_id>.find(orig_trx_id);
+            auto it_ = local_origtrxs.get<by_trx_id>().find(orig_trx_id);
+            auto it = local_origtrxs.project<0>(it_);
             ++it;
             while ( it != local_origtrxs.end() && it->block_num <= lib_num ){
                orig_trxs_to_push.push_back( *it );
@@ -2334,7 +2344,7 @@ namespace eosio { namespace ibc {
          }
          uint32_t last_cash_seq_num = opt_gm->cash_seq_num;
 
-         auto it = local_cashtrxs.get<by_id>.find(last_cash_seq_num);
+         auto it = local_cashtrxs.get<by_id>().find(last_cash_seq_num);
          ++it;
          while ( it != local_cashtrxs.end() && it->block_num <= lib_num ){
             cash_trxs_to_push.push_back( *it );
@@ -2357,8 +2367,8 @@ namespace eosio { namespace ibc {
          }
          uint32_t last_cash_seq_num = opt_gm->cash_seq_num;
 
-         auto it = local_cashtrxs.get<by_id>.find(last_cash_seq_num);
-         if ( it == local_cashtrxs.end() || ++it->block_num > min_last_num ) {
+         auto it = local_cashtrxs.get<by_id>().find(last_cash_seq_num);
+         if ( it == local_cashtrxs.end() || (++it)->block_num > min_last_num ) {
             all_cashtrxs_sended = true;
          }
 
@@ -2368,7 +2378,7 @@ namespace eosio { namespace ibc {
 
 
          if ( all_cashtrxs_sended == true && true ){
-            all_sended == true;
+            all_sended = true;
          }
       }
 

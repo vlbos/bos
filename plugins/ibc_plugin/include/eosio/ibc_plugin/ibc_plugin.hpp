@@ -154,14 +154,13 @@ namespace eosio { namespace ibc {
 
 }}
 
-//FC_REFLECT( eosio::connection_status, (peer)(connecting)(syncing)(last_handshake) )
+FC_REFLECT( eosio::ibc::connection_status, (peer)(connecting)(syncing)(last_handshake) )
 
 FC_REFLECT( eosio::ibc::global_state_ibc_chain, (lib_depth) )
 FC_REFLECT( eosio::ibc::section_type, (first)(last)(np_num)(valid)(producers)(block_nums) )
 FC_REFLECT( eosio::ibc::new_section_params, (headers)(blockroot_merkle) )
 FC_REFLECT( eosio::ibc::block_header_state_type, (block_num)(block_id)(header)(active_schedule_id)(pending_schedule_id)(blockroot_merkle)(block_signing_key) )
 FC_REFLECT( eosio::ibc::blockroot_merkle_type, (block_num)(merkle) )
-
 
 FC_REFLECT( eosio::ibc::transfer_action_type, (from)(to)(quantity)(memo) )
 FC_REFLECT( eosio::ibc::transfer_action_info, (contract)(action)(from)(quantity) )
