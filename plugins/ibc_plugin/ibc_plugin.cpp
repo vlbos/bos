@@ -2032,7 +2032,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::chain_checker( ibc_heartbeat_message& msg ) {
       auto lwcls = get_lwcls_info();
       if ( lwcls == lwc_section_type() ){
-         ilog("doesn't get light weight client last section infomation");
+         ilog("doesn't receive any lwcls infomation from connected peer chain relay nodes");
          return;
       }
 
