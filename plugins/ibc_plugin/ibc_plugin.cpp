@@ -212,7 +212,7 @@ namespace eosio { namespace ibc {
       void handle_message( connection_ptr c, const ibc_trxs_data_message &msg);
 
       lwc_section_type get_lwcls_info( );
-      bool head_catched_up( );
+      bool is_head_catchup( );
       bool should_send_ibc_heartbeat();
       void chain_checker( ibc_heartbeat_message& msg );
       void ibc_chain_contract_checker( ibc_heartbeat_message& msg );
@@ -297,7 +297,7 @@ namespace eosio { namespace ibc {
     */
    constexpr auto     def_send_buffer_size_mb = 4;
    constexpr auto     def_send_buffer_size = 1024*1024*def_send_buffer_size_mb;
-   constexpr auto     def_max_clients = 25; // 0 for unlimited clients
+   constexpr auto     def_max_clients = 10; // 0 for unlimited clients
    constexpr auto     def_max_nodes_per_host = 1;
    constexpr auto     def_conn_retry_wait = 30;
    constexpr auto     def_txn_expire_wait = std::chrono::seconds(3);
@@ -693,20 +693,19 @@ namespace eosio { namespace ibc {
    }
    
    void ibc_chain_contract::get_contract_state(){
+      contract_state c_state = none;
       if ( has_contract() ) {
-         state = deployed;
-      }
-      if ( !lwc_initialized() ){
-         return;
-      }
-      auto sp = get_global_singleton();
-      if ( sp.valid() ) {
-         global_state_ibc_chain gstate = *sp;
-         lwc_lib_depth = gstate.lib_depth;
-         if ( lib_depth_valid() ){
-            state = working;
+         c_state = deployed;
+         auto sp = get_global_singleton();
+         if ( sp.valid() ) {
+            global_state_ibc_chain gstate = *sp;
+            lwc_lib_depth = gstate.lib_depth;
+         }
+         if ( lwc_initialized() && lib_depth_valid() ){
+            c_state = working;
          }
       }
+      state = c_state;
    }
 
    bool ibc_chain_contract::lib_depth_valid() const {
@@ -866,16 +865,18 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_token_contract::get_contract_state(){
+      contract_state c_state = none;
       if ( has_contract() ) {
-         state = deployed;
-      }
-      auto p = get_global_state_singleton();
-      if ( p.valid() ){
-         const auto& obj = *p;
-         if ( obj.ibc_contract != name() && obj.active ){
-            state = working;
+         c_state = deployed;
+         auto p = get_global_state_singleton();
+         if ( p.valid() ){
+            const auto& obj = *p;
+            if ( obj.ibc_contract != name() && obj.active ){
+               c_state = working;
+            }
          }
       }
+      state = c_state;
    }
 
    range_type ibc_token_contract::get_table_origtrxs_id_range() {
@@ -1990,16 +1991,17 @@ namespace eosio { namespace ibc {
       return sv[ sv.size() / 2 + 1 ];
    }
 
-   bool ibc_plugin_impl::head_catched_up() {
+   bool ibc_plugin_impl::is_head_catchup() {
       auto head_block_time_point = fc::time_point( chain_plug->chain().fork_db_head_block_time() );
       return head_block_time_point < fc::time_point::now() + fc::seconds(3) &&
              head_block_time_point > fc::time_point::now() - fc::seconds(5);
    }
 
    bool ibc_plugin_impl::should_send_ibc_heartbeat(){
-      // check if head catched up
-      if ( !head_catched_up() ){
-         ilog("chain header doesn't catch up, wait");
+
+      // check if local head catch up
+      if ( !is_head_catchup() ){
+         ilog("local chain head doesn't catch up current chain head, waiting...");
          return false;
       }
 
@@ -2007,14 +2009,18 @@ namespace eosio { namespace ibc {
       if ( chain_contract->state != working ){
          chain_contract->get_contract_state();
       }
-
-      if ( chain_contract->state == none || !chain_contract->lib_depth_valid() ){
+      if ( chain_contract->state == none ){
          ilog("ibc.chain contract not deployed");
+         return false;
+      }
+      if (!chain_contract->lib_depth_valid() ){
+         ilog("ibc.chain contract lib_depth validate failed");
          return false;
       }
 
       // check ibc.token contract
       if ( token_contract->state != working ){
+         token_contract->get_contract_state();
          ilog("ibc.token contract not in working state");
          return false;
       }
@@ -2603,6 +2609,14 @@ namespace eosio { namespace ibc {
    void ibc_plugin::set_program_options( options_description& /*cli*/, options_description& cfg )
    {
       cfg.add_options()
+         ( "ibc-chain-contract", bpo::value<string>(), "Name of this chain's ibc chain contract")
+         ( "ibc-token-contract", bpo::value<string>(), "Name of this chain's ibc token contract")
+         ( "ibc-relay-name", bpo::value<string>(), "ID of relay controlled by this node (e.g. relayone)")
+         ( "ibc-relay-private-key", bpo::value<string>(),
+           "Key=Value pairs in the form <public-key>=KEY:<private-key>\n"
+           "   <public-key>   \tis a string form of a vaild EOSIO public key\n\n"
+           "   <private-key>  \tis a string form of a valid EOSIO private key which maps to the provided public key\n\n")
+
          ( "ibc-listen-endpoint", bpo::value<string>()->default_value( "0.0.0.0:5678" ), "The actual host:port used to listen for incoming ibc connections.")
          ( "ibc-server-address", bpo::value<string>(), "An externally accessible host:port for identifying this node. Defaults to ibc-listen-endpoint.")
          ( "ibc-sidechain-id", bpo::value<string>(), "The sidechain's chain id")
@@ -2619,14 +2633,6 @@ namespace eosio { namespace ibc {
          ( "ibc-connection-cleanup-period", bpo::value<int>()->default_value(def_conn_retry_wait), "Number of seconds to wait before cleaning up dead connections")
          ( "ibc-max-cleanup-time-msec", bpo::value<int>()->default_value(10), "Maximum connection cleanup time per cleanup call in millisec")
          ( "ibc-version-match", bpo::value<bool>()->default_value(false), "True to require exact match of ibc plugin version.")
-
-         ( "ibc-chain-contract", bpo::value<string>(), "Name of this chain's ibc chain contract")
-         ( "ibc-token-contract", bpo::value<string>(), "Name of this chain's ibc token contract")
-         ( "ibc-relay-name", bpo::value<string>(), "ID of relay controlled by this node (e.g. relayone)")
-         ( "ibc-relay-private-key", bpo::value<string>(),
-           "Key=Value pairs in the form <public-key>=KEY:<private-key>\n"
-           "   <public-key>   \tis a string form of a vaild EOSIO public key\n\n"
-           "   <private-key>  \tis a string form of a valid EOSIO private key which maps to the provided public key\n\n")
 
          ( "ibc-log-format", bpo::value<string>()->default_value( "[\"${_name}\" ${_ip}:${_port}]" ),
            "The string used to format peers when logging messages about them.  Variables are escaped with ${<variable name>}.\n"
@@ -2655,7 +2661,7 @@ namespace eosio { namespace ibc {
 
          my->network_version_match = options.at( "ibc-version-match" ).as<bool>();
 
-         OPTION_ASSERT( "bc-sidechain-id" )
+         OPTION_ASSERT( "ibc-sidechain-id" )
          my->sidechain_id = fc::sha256( options.at( "ibc-sidechain-id" ).as<string>() );
          ilog( "ibc sidechain id is ${id}", ("id",  my->sidechain_id.str()));
 
