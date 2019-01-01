@@ -634,15 +634,15 @@ namespace eosio { namespace ibc {
    }
 
    void push_action( action actn ) {
-      if ( my_impl->private_keys.empty() ){
-         wlog("ibc contract account active key not found, can not execute action");
+      if ( my_impl->relay_private_key == chain::private_key_type() ){
+         wlog("ibc relay private key not found, can not execute action");
          return;
       }
 
       signed_transaction trx;
       trx.actions.emplace_back( actn );
       set_transaction_headers( trx );
-      trx.sign( my_impl->private_keys.begin()->second, my_impl->chain_plug->chain().get_chain_id() );
+      trx.sign( my_impl->relay_private_key, my_impl->chain_plug->chain().get_chain_id() );
       push_transaction( trx );
    }
 
@@ -789,7 +789,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_chain_contract::chain_init( const lwc_init_message &msg ){
-      auto actn = get_action( account, N(chaininit), vector<permission_level>{{ account, config::active_name}}, mvo()
+      auto actn = get_action( account, N(chaininit), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
             ("header",            fc::raw::pack(msg.header))
             ("active_schedule",   msg.active_schedule)
             ("blockroot_merkle",  msg.blockroot_merkle));
@@ -1728,21 +1728,29 @@ namespace eosio { namespace ibc {
       c->rec = 0;
    }
 
+#define PLUGIN_TEST
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg) {
       peer_ilog(c, "received ibc_heartbeat_message");
 
       // handle ibc_chain_state and lwcls
       if ( msg.ibc_chain_state == deployed ) {
+
          // send lwc_init_message
          controller &cc = chain_plug->chain();
          uint32_t head_num = cc.fork_db_head_block_num();
-         uint32_t depth = 200;
-         block_state_ptr p = cc.fetch_block_state_by_number( head_num - depth );
 
-         while ( p == block_state_ptr() && depth >= 10 ){
+#ifndef PLUGIN_TEST
+         uint32_t depth = 200;
+         block_state_ptr p;
+         while ( p == block_state_ptr() && depth >= 25 ){
+            uint32_t check_num = std::max( head_num - depth, 1 );
+            p = cc.fetch_block_state_by_number( check_num );
+            if ( p == block_state_ptr() ){
+               ilog("didn't get block_state_ptr of block num: ${n}", ("n", check_num ));
+            }else{
+               break;
+            }
             depth /= 2;
-            block_state_ptr p = cc.fetch_block_state_by_number( head_num - depth );
-            ilog("didn't get block_state_ptr of block num: ${n}", ("n", head_num - depth ));
          }
 
          if ( p == block_state_ptr() ){
@@ -1754,7 +1762,9 @@ namespace eosio { namespace ibc {
             ilog("pending_schedule version not equal to active_schedule version, wait until equal");
             return;
          }
-
+#else
+         block_state_ptr p = cc.fetch_block_state_by_number( head_num );
+#endif
          lwc_init_message msg;
          msg.header = p->header;
          msg.active_schedule = p->active_schedule;
