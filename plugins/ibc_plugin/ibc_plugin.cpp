@@ -957,7 +957,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_token_contract::cash( const cash_action_params& p ){
-      auto actn = get_action( account, N(cash), vector<permission_level>{{ account, config::active_name}}, mvo()
+      auto actn = get_action( account, N(cash), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
          ("seq_num",                      p.seq_num)
          ("orig_trx_block_num",           p.orig_trx_block_num)
          ("orig_trx_packed_trx_receipt",  p.orig_trx_packed_trx_receipt)
@@ -977,7 +977,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_token_contract::cashconfirm( const cashconfirm_action_params& p ){
-      auto actn = get_action( account, N(cashconfirm), vector<permission_level>{{ account, config::active_name}}, mvo()
+      auto actn = get_action( account, N(cashconfirm), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
          ("cash_trx_block_num",          p.cash_trx_block_num)
          ("cash_trx_packed_trx_receipt", p.cash_trx_packed_trx_receipt)
          ("cash_trx_merkle_path",        p.cash_trx_merkle_path)
