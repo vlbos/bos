@@ -234,6 +234,8 @@ namespace eosio { namespace ibc {
       void new_prod_blk_num_insert( uint32_t num );
       optional<ibc_trx_rich_info> get_ibc_trx_rich_info( uint32_t block_time_slot, transaction_id_type trx_id, uint64_t table_id );
 
+      optional<transfer_action_type> get_transfer_action_info( std::vector<char> packed_trx_receipt );
+
       void ibc_core_checker( );
       void start_ibc_core_timer( );
 
@@ -865,6 +867,10 @@ namespace eosio { namespace ibc {
       optional<global_mutable_ibc_token> get_global_mutable_singleton();
 
       // other
+
+      void push_cash_recurse( int index, const std::shared_ptr<std::vector<cash_action_params>>& params, uint32_t start_seq_num );
+      void push_cash_trxs( const std::vector<ibc_trx_rich_info>& params, uint32_t start_seq_num );
+
       bool has_contract();
       void get_contract_state();
 
@@ -966,6 +972,89 @@ namespace eosio { namespace ibc {
          return result;
       }
       return optional<global_mutable_ibc_token>();
+   }
+
+   void ibc_token_contract::push_cash_recurse( int index, const std::shared_ptr<std::vector<cash_action_params>>& params, uint32_t start_seq_num  ){
+      auto next = [=](const fc::static_variant<fc::exception_ptr, chain_apis::read_write::push_transaction_results>& result) {
+         uint32_t next_seq_num = start_seq_num;
+         if (result.contains<fc::exception_ptr>()) {
+            try {
+               result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
+            } FC_LOG_AND_DROP()
+            elog("push_transaction failed");
+         } else {
+            auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
+            ilog("pushed transaction: ${id}", ( "id", trx_id ));
+            next_seq_num += 1;
+         }
+
+         int next_index = index + 1;
+         if (next_index < params->size()) {
+            push_cash_recurse( next_index, params, next_seq_num );
+         }
+      };
+
+      auto par = params->at(index);
+      auto actn = get_action( account, N(cash), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+               ("seq_num",                      start_seq_num)
+               ("orig_trx_block_num",           par.orig_trx_block_num)
+               ("orig_trx_packed_trx_receipt",  par.orig_trx_packed_trx_receipt)
+               ("orig_trx_merkle_path",         par.orig_trx_merkle_path)
+               ("orig_trx_id",                  par.orig_trx_id)
+               ("to",                           par.to)
+               ("quantity",                     par.quantity)
+               ("memo",                         par.memo)
+               ("relay",                        my_impl->relay ));
+
+      if ( ! actn.valid() ){
+         elog("get action failed");
+         return;
+      }
+
+      if ( my_impl->relay_private_key == chain::private_key_type() ){
+         elog("ibc relay private key not found, can not execute action");
+         return;
+      }
+
+      signed_transaction trx;
+      trx.actions.emplace_back( *actn );
+      set_transaction_headers( trx );
+      trx.sign( my_impl->relay_private_key, my_impl->chain_plug->chain().get_chain_id() );
+      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction(trx))), next );
+   }
+
+   void ibc_token_contract::push_cash_trxs( const std::vector<ibc_trx_rich_info>& params, uint32_t start_seq_num ){
+      std::vector<cash_action_params> actions;
+      for ( const auto& trx : params ){
+         cash_action_params par;
+         par.seq_num = 0;
+         par.orig_trx_block_num = trx.block_num;
+         par.orig_trx_packed_trx_receipt = trx.packed_trx_receipt;
+         par.orig_trx_merkle_path = trx.merkle_path;
+         par.orig_trx_id = trx.trx_id;
+         auto opt = my_impl->get_transfer_action_info( trx.packed_trx_receipt );
+         if ( opt.valid() ){
+            transfer_action_type actn = *opt;
+            par.to = actn.to;
+            par.quantity = actn.quantity;
+            par.memo = "ibc trx";
+            par.relay = my_impl->relay;
+            actions.push_back(par);
+         } else {
+            elog("internal error, failed to get transfer action infomation from packed_trx_receipt");
+            break;
+         }
+      }
+
+      if ( actions.empty() ){
+         return;
+      }
+
+      try {
+         EOS_ASSERT( actions.size() <= 1000, too_many_tx_at_once, "Attempt to push too many transactions at once" );
+         auto params_copy = std::make_shared<std::vector<cash_action_params>>(actions.begin(), actions.end());
+         push_cash_recurse( 0, params_copy, start_seq_num );
+      } FC_LOG_AND_DROP()
    }
 
    void ibc_token_contract::cash( const cash_action_params& p ){
@@ -1863,10 +1952,10 @@ namespace eosio { namespace ibc {
 
       //  --------- test--------
       if ( local_origtrxs.begin() != local_origtrxs.end() ){
-         ilog(" local_origtrxs: ${f} to ${g}",("f",local_origtrxs.begin()->table_id )("t",local_origtrxs.rbegin()->table_id ) );
+         ilog(" local_origtrxs: ${f} to ${t}",("f",local_origtrxs.begin()->table_id )("t",local_origtrxs.rbegin()->table_id ) );
       }
       if ( local_cashtrxs.begin() != local_cashtrxs.end() ){
-         ilog(" local_cashtrxs: ${f} to ${g}",("f",local_cashtrxs.begin()->table_id )("t",local_cashtrxs.rbegin()->table_id ) );
+         ilog(" local_cashtrxs: ${f} to ${t}",("f",local_cashtrxs.begin()->table_id )("t",local_cashtrxs.rbegin()->table_id ) );
       }
       idump((new_prod_blk_nums));
       ilog("msg ok ---- ------ -------");
@@ -2423,11 +2512,23 @@ namespace eosio { namespace ibc {
       return trx_info;
    }
 
+   optional<transfer_action_type> ibc_plugin_impl::get_transfer_action_info( std::vector<char> packed_trx_receipt ){
+      try {
+         transaction_receipt trx_rcpt;
+         fc::raw::unpack( packed_trx_receipt.data(), packed_trx_receipt.size(), trx_rcpt );
+         packed_transaction pkd_trx = trx_rcpt.trx.get<packed_transaction>();
+         transaction trx;
+         fc::raw::unpack(pkd_trx.packed_trx.data(),pkd_trx.packed_trx.size(),trx);
+         transfer_action_type action_para;
+         fc::raw::unpack(trx.actions.front().data.data(), trx.actions.front().data.size(), action_para );
+         return action_para;
+      } FC_LOG_AND_DROP()
+      return optional<transfer_action_type>();
+   }
+
    /**
     * 本函数实现了整个跨链信息交互逻辑内核
     * 轻客户端的sction是核心处理单元
-    *
-    *
     *
     * 首先根据 local_origtrxs local_cashtrxs new_prod_blk_nums 计算当前section的最小范围。
     * 判断当前合约中的section是否达到了最小范围。
@@ -2448,6 +2549,8 @@ namespace eosio { namespace ibc {
          token_contract->get_contract_state();
          return;
       }
+
+      ///< first step: let lwcls reach its minimum length
 
       // get lwcls
       auto opt_sctn = chain_contract->get_sections_tb_reverse_nth_section();
@@ -2497,20 +2600,13 @@ namespace eosio { namespace ibc {
          }
       }
 
+      ///< second step: send all transactions which should validate within this lwcls
 
-
-
-
-      ilog("+++++++++++=============");
-      return;
-
-      //如果已经有进lib的区块，则开始发送local_origtrxs 和local_cashtrxs 中可以发送的交易。
       if ( lwcls.valid ){
          uint32_t lib_num =  std::max( lwcls.first, lwcls.last - chain_contract->lwc_lib_depth );
 
-         // 收集应该发送的 local_origtrxs 并批量发送
+         // collect and send all transactions of local_origtrxs within this lwcls
          std::vector<ibc_trx_rich_info> orig_trxs_to_push;
-
          auto range = token_contract->get_table_cashtrxs_seq_num_range();
          if ( range.first == 0 ){
             for( const auto& t : local_origtrxs.get<by_id>( ) ) {
@@ -2519,21 +2615,24 @@ namespace eosio { namespace ibc {
                }
             }
          } else {
-            auto opt_cash = token_contract->get_table_cashtrxs_trx_info_by_seq_num( range.second );
-            auto orig_trx_id = opt_cash->orig_trx_id;
-
-            auto it_ = local_origtrxs.get<by_trx_id>().find(orig_trx_id);
-            auto it = local_origtrxs.project<0>(it_);
-            ++it;
-            while ( it != local_origtrxs.end() && it->block_num <= lib_num ){
-               orig_trxs_to_push.push_back( *it );
+            auto cash_opt = token_contract->get_table_cashtrxs_trx_info_by_seq_num( range.second );
+            if ( cash_opt.valid() ){
+               auto orig_trx_id = cash_opt->orig_trx_id;
+               auto it_trx_id = local_origtrxs.get<by_trx_id>().find( orig_trx_id );
+               auto it = local_origtrxs.project<0>(it_trx_id);
+               ++it;
+               while ( it != local_origtrxs.end() && it->block_num <= lib_num ){
+                  orig_trxs_to_push.push_back( *it );
+               }
+            } else {
+               ilog("internal error, failed to get cash transaction infomation of seq_num ${n}",("n",range.second));
             }
          }
-         if ( !orig_trxs_to_push.empty() ){
-            // todo push these trxs
+         if ( ! orig_trxs_to_push.empty() ){
+            token_contract->push_cash_trxs( orig_trxs_to_push, range.second + 1 );
          }
 
-         // 收集应该发送的 local_cashtrxs 并批量发送
+         // collect and send all transactions of local_cashtrxs within this lwcls
          std::vector<ibc_trx_rich_info> cash_trxs_to_push;
 
          auto opt_gm = token_contract->get_global_mutable_singleton();
