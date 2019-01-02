@@ -1753,9 +1753,7 @@ namespace eosio { namespace ibc {
       peer_ilog(c, "received ibc_heartbeat_message");
 
       // handle ibc_chain_state and lwcls
-      if ( msg.ibc_chain_state == deployed ) {
-
-         // send lwc_init_message
+      if ( msg.ibc_chain_state == deployed ) {  // send lwc_init_message
          controller &cc = chain_plug->chain();
          uint32_t head_num = cc.fork_db_head_block_num();
 
@@ -1790,19 +1788,24 @@ namespace eosio { namespace ibc {
          msg.active_schedule = p->active_schedule;
          msg.blockroot_merkle = p->blockroot_merkle;
 
-         ilog("send lwc_init_message");
+         peer_ilog(c,"send lwc_init_message");
          c->enqueue( msg, true);
-      } else if ( msg.ibc_chain_state == working ){
-         // validate msg
+      } else if ( msg.ibc_chain_state == working ){ // validate and update local lwcls_info
          auto check_id = [=](uint32_t block_num, block_id_type id) -> bool {
-            auto ret_id = my_impl->chain_plug->chain().get_block_id_for_num(block_num);
-            return ret_id == id;
+            if ( block_num == 0 || block_num > chain_plug->chain().head_block_num() ){
+               return false;
+            }
+            try {
+               auto ret_id = my_impl->chain_plug->chain().get_block_id_for_num(block_num);
+               return ret_id == id;
+            } FC_LOG_AND_DROP()
+            return false;
          };
 
          bool valid = false;
          if (check_id(msg.lwcls.first_num, msg.lwcls.first_id)) {
             if (msg.lwcls.valid) {
-               if (check_id(msg.lwcls.first_num, msg.lwcls.first_id)) {
+               if (check_id(msg.lwcls.lib_num, msg.lwcls.lib_id)) {
                   valid = true;
                } else {
                   valid = false;
@@ -1817,14 +1820,10 @@ namespace eosio { namespace ibc {
          } else {
             c->lwcls_info = lwc_section_type();
             c->lwcls_info_update_time = fc::time_point();
-            elog("received ibc_heartbeat_message not correct");
+            peer_elog(c,"received invalid ibc_heartbeat_message");
             idump((msg.lwcls));
          }
-         ilog("msg ok ---- ");
       }
-
-      ilog("msg ok ---- return");
-      return;
 
       // check origtrxs_table_id_range
       if ( msg.origtrxs_table_id_range != range_type() ){
@@ -1834,10 +1833,11 @@ namespace eosio { namespace ibc {
             request.range = msg.origtrxs_table_id_range;
             send_all( request );
          } else if ( local_origtrxs.rbegin()->table_id < msg.origtrxs_table_id_range.second ) {
-            request.range.first = std::max(  msg.origtrxs_table_id_range.first, local_origtrxs.rbegin()->table_id );
+            request.range.first = std::max(  msg.origtrxs_table_id_range.first, local_origtrxs.rbegin()->table_id + 1 );
             request.range.second = msg.origtrxs_table_id_range.second;
             send_all( request );
          }
+         ilog("send ibc_trxs_request_message, origtrxs id range:[${f},${t}]",("f",request.range.first)("",request.range.second));
       }
 
       // check cashtrxs_table_id_range
@@ -1848,10 +1848,11 @@ namespace eosio { namespace ibc {
             request.range = msg.cashtrxs_table_seq_num_range;
             send_all( request );
          } else if ( local_cashtrxs.rbegin()->table_id < msg.cashtrxs_table_seq_num_range.second ) {
-            request.range.first = std::max(  msg.cashtrxs_table_seq_num_range.first, local_cashtrxs.rbegin()->table_id );
+            request.range.first = std::max(  msg.cashtrxs_table_seq_num_range.first, local_cashtrxs.rbegin()->table_id + 1 );
             request.range.second = msg.cashtrxs_table_seq_num_range.second;
             send_all( request );
          }
+         ilog("send ibc_trxs_request_message, cashtrxs id range:[${f},${t}]",("f",request.range.first)("",request.range.second));
       }
 
       // check new_producers_block_num
@@ -1859,6 +1860,16 @@ namespace eosio { namespace ibc {
          new_prod_blk_num_insert( msg.new_producers_block_num );
       }
 
+
+      //  --------- test--------
+      if ( local_origtrxs.begin() != local_origtrxs.end() ){
+         ilog(" local_origtrxs: ${f} to ${g}",("f",local_origtrxs.begin()->table_id )("t",local_origtrxs.rbegin()->table_id ) );
+      }
+      if ( local_cashtrxs.begin() != local_cashtrxs.end() ){
+         ilog(" local_cashtrxs: ${f} to ${g}",("f",local_cashtrxs.begin()->table_id )("t",local_cashtrxs.rbegin()->table_id ) );
+      }
+      idump((new_prod_blk_nums));
+      ilog("msg ok ---- ------ -------");
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_init_message &msg) {
@@ -1983,6 +1994,7 @@ namespace eosio { namespace ibc {
       if ( msg_first_num == ls.last + 1 ){ // append directly
          ilog("append headers [${from},${to}] to lwcls -----1------",("from",msg_first_num)("to",msg_last_num));
          chain_contract->pushsection( msg );
+         ilog("append headers to lwcls -----1-1------");
 
       } else if( msg_first_num <= ls.last ) { // find fit number then append directly
          // find the first block number, which id is same in msg and lwcls.
@@ -2042,45 +2054,46 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_request_message &msg) {
-      peer_ilog(c, "received ibc_trxs_request_message");
-      if ( msg.table == N(origtrxs) ){
-         ibc_trxs_data_message ret_msg;
-         ret_msg.table = N(origtrxs);
+   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_request_message &msg ) {
+      peer_ilog(c, "received ibc_trxs_request_message, id range [${f},${t}]",("f",msg.range.first)("t",msg.range.second));
 
+      ibc_trxs_data_message ret_msg;
+      ret_msg.table = msg.table;
+
+      if ( msg.table == N(origtrxs) ){
          for( auto id = msg.range.first; id <= msg.range.second; ++id ){
             auto p = token_contract->get_table_origtrxs_trx_info_by_id( id );
             if ( p.valid() ){
                original_trx_info trx_info = *p;
-
-               auto info_p =  get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.id );
-
-               ibc_trx_rich_info rich_info = *info_p;
-               ret_msg.trxs_rich_info.push_back( rich_info );
+               auto info_opt =  get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.id );
+               if ( info_opt.valid() ){
+                  ret_msg.trxs_rich_info.push_back( *info_opt );
+               } else {
+                  ilog("internal error, failed to get rich info of transaction: ${trx}, block time slot: ${tsl}",("trx",trx_info.trx_id)("tsl",trx_info.block_time_slot));
+               }
             }
          }
-         c->enqueue( ret_msg );
-         return;
-      }
 
-      if ( msg.table == N(cashtrxs) ){
-         ibc_trxs_data_message ret_msg;
-         ret_msg.table = N(cashtrxs);
-
+      } else if ( msg.table == N(cashtrxs) ){
          for( auto id = msg.range.first; id <= msg.range.second; ++id ){
             auto p = token_contract->get_table_cashtrxs_trx_info_by_seq_num( id );
             if ( p.valid() ){
                cash_trx_info trx_info = *p;
-               auto rich_info = get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.seq_num );
-               ret_msg.trxs_rich_info.push_back( *rich_info );
+               auto info_opt = get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.seq_num );
+               if ( info_opt.valid() ){
+                  ret_msg.trxs_rich_info.push_back( *info_opt );
+               } else {
+                  ilog("internal error, failed to get rich info of transaction: ${trx}, block time slot: ${tsl}",("trx",trx_info.trx_id)("tsl",trx_info.block_time_slot));
+               }
             }
          }
-         c->enqueue( ret_msg );
-         return;
       }
+
+      peer_ilog(c,"send ibc_trxs_data_message, size:${s}, id range:[${f},$(t)]",("s",ret_msg.trxs_rich_info.size())("f",ret_msg.trxs_rich_info.begin()->table_id)("t",ret_msg.trxs_rich_info.rbegin()->table_id));
+      c->enqueue( ret_msg );
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_data_message &msg) {
+   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_data_message &msg ) {
       peer_ilog(c, "received ibc_trxs_data_message");
 
       if ( msg.table == N(origtrxs) ) {
@@ -2172,18 +2185,10 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      idump((lwcls));
-
       uint32_t local_safe_head_num = chain_plug->chain().head_block_num() - MinDepth;
-
-      idump((lwcls.last_num )(local_safe_head_num));
-
       if ( lwcls.last_num >= local_safe_head_num ){
-         ilog("need not check");
          return;
       }
-
-      ilog("~~~~~~~~~~~~1~~~~~~~~~~~~~~~");
 
       signed_block_ptr check_begin, check_end;
       try {
@@ -2203,7 +2208,7 @@ namespace eosio { namespace ibc {
          return chain_plug->chain().fetch_block_by_number(num);
       };
       
-      ilog("~~~~~~~~~~~~2~~~~~~~~~~~~~~~");
+      ilog("~~~~~~~~~~~~1~~~~~~~~~~~~~~~");
       // check if producer schedule updated
       if ( check_begin->schedule_version < check_end->schedule_version ){
          // find the last header whose schedule version equal to check_begin's schedule version, use binary search
@@ -2215,7 +2220,7 @@ namespace eosio { namespace ibc {
 
          while( !(search_first->schedule_version == check_begin->schedule_version &&
                   get_block_ptr( search_first->block_num() + 1 )->schedule_version == check_begin->schedule_version + 1 ) ){
-            ilog("~~~~~~~~~~~~3~~~~~~~~~~~~~~~");
+            ilog("~~~~~~~~~~~~2~~~~~~~~~~~~~~~");
             if ( search_middle->schedule_version != check_begin->schedule_version  ){
                search_last = search_middle;
                search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
@@ -2272,7 +2277,6 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_ibc_heartbeat_timer() {
-
       try {
          if ( should_send_ibc_heartbeat() ){
             ibc_heartbeat_message msg;
@@ -2283,12 +2287,12 @@ namespace eosio { namespace ibc {
             for( auto &c : connections) {
                if( c->current() ) {
                   peer_ilog(c,"sending ibc_heartbeat_message");
+                  idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.lwcls));
                   c->enqueue( msg );
                }
             }
          }
       } FC_LOG_AND_DROP()
-
 
       ibc_heartbeat_timer->expires_from_now (ibc_heartbeat_interval);
       ibc_heartbeat_timer->async_wait ([this](boost::system::error_code ec) {
@@ -2307,8 +2311,6 @@ namespace eosio { namespace ibc {
          new_prod_blk_nums.insert( num );
       }
    }
-
-
 
    vector<digest_type>  get_merkle_path( vector<digest_type> ids, uint32_t num ) {
       if( 0 == ids.size() || num > ids.size() - 1 ) { return vector<digest_type>(); }
@@ -2442,15 +2444,15 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      // 获得lwcls
+      // get lwcls
       auto opt_sctn = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !opt_sctn.valid() ){
-         elog("can not get lwcls");
+         elog("internel error, can not get lwcls");
          return;
       }
       section_type lwcls = *opt_sctn;
 
-      // 首先根据 local_origtrxs local_cashtrxs new_prod_blk_nums 计算当前section的最小范围。
+      // calculation the minimun range of lwcls should reach through information of local_origtrxs local_cashtrxs and new_prod_blk_nums
       uint32_t min_last_num = lwcls.first + chain_contract->lwc_lib_depth ;
       if ( !(lwcls.np_num == 0 || lwcls.np_num > chain_plug->chain().head_block_num()) ){
          min_last_num = lwcls.np_num + 325 + chain_contract->lwc_lib_depth;
@@ -2476,7 +2478,7 @@ namespace eosio { namespace ibc {
          }
       }
 
-      // 判读是否达到了最小范围
+      // check if lwcls reached the minimum range
       if ( lwcls.last < min_last_num ){
          lwc_section_request_message msg;
          msg.start_block_num = lwcls.last + 1;
@@ -2489,6 +2491,10 @@ namespace eosio { namespace ibc {
             }
          }
       }
+
+
+
+
 
       ilog("+++++++++++=============");
       return;
