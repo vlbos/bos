@@ -1960,13 +1960,7 @@ namespace eosio { namespace ibc {
          return;
       }
 
-#ifdef PLUGIN_TEST
-      if ( ls.last <= chain_contract->lwc_lib_depth ){
-         return;
-      }
-#endif
-
-      if ( ls.valid && msg_last_num <= std::max(ls.first, ls.last - chain_contract->lwc_lib_depth) ){
+      if ( ls.valid && msg_last_num <= std::max(ls.first, ls.last > chain_contract->lwc_lib_depth ? ls.last - chain_contract->lwc_lib_depth : 0) ){
          ilog("nothing to do");
          return;
       }
