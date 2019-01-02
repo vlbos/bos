@@ -1578,7 +1578,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::irreversible_block(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+//      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
       blockroot_merkle_type brtm;
       brtm.block_num = block->block_num;
       brtm.merkle = block->blockroot_merkle;
@@ -1871,14 +1871,29 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_request_message &msg) {
-      peer_ilog(c, "received lwc_section_request_message");
+      peer_ilog(c, "received lwc_section_request_message [${from},${to})",("from",msg.start_block_num)("to",msg.end_block_num));
 
-      if ( chain_plug->chain().head_block_num() - msg.start_block_num < MinDepth + MaxSectionLength ){
-         ilog("return directly");
+      uint32_t rq_length = msg.end_block_num - msg.start_block_num;
+      uint32_t head_blk_num = chain_plug->chain().head_block_num();
+      uint32_t safe_blk_num = head_blk_num - MinDepth;
+
+      if ( msg.start_block_num >= safe_blk_num || rq_length == 0 ){
+         return;
+      }
+      if ( rq_length >= MaxSectionLength && safe_blk_num - msg.start_block_num < MaxSectionLength ){
+         ilog("have not enough data");
+         return;
+      }
+      if  ( rq_length < MaxSectionLength && msg.end_block_num > safe_blk_num ) {
+         ilog("have not enough data");
          return;
       }
 
-      uint32_t end_num = std::min( chain_plug->chain().head_block_num() - MinDepth, msg.end_block_num );
+      uint32_t end_num = std::min( safe_blk_num, msg.end_block_num );
+
+      if ( msg.end_block_num > safe_blk_num ){
+         end_num = msg.start_block_num + ((end_num - msg.start_block_num ) / MaxSectionLength) * MaxSectionLength;
+      }
 
       for ( uint32_t start_num = msg.start_block_num; start_num < end_num; start_num += MaxSectionLength ){
          lwc_section_data_message ret_msg;
@@ -1934,7 +1949,7 @@ namespace eosio { namespace ibc {
             ret_msg.headers.push_back( *(chain_plug->chain().fetch_block_by_number( check_num )) );
             check_num += 1;
          }
-         peer_ilog(c,"sending lwc_section_data_message, range ${from},${to})", ("from",start_num)("to",tmp_end_num));
+         peer_ilog(c,"sending lwc_section_data_message, range [${from},${to})", ("from",start_num)("to",tmp_end_num));
          c->enqueue( ret_msg );
       }
    }
@@ -1965,12 +1980,11 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      if ( msg_first_num == ls.last + 1 ){// append directly
-         ilog("append directly -----1------");
+      if ( msg_first_num == ls.last + 1 ){ // append directly
+         ilog("append headers [${from},${to}] to lwcls -----1------",("from",msg_first_num)("to",msg_last_num));
          chain_contract->pushsection( msg );
 
       } else if( msg_first_num <= ls.last ) { // find fit number then append directly
-         ilog("append directly ----2-------");
          // find the first block number, which id is same in msg and lwcls.
          uint32_t check_num_first = std::min( uint32_t(ls.last), msg.headers.rbegin()->block_num() );
          uint32_t check_num_last = std::max( uint32_t(ls.valid ? ls.last - chain_contract->lwc_lib_depth : ls.first), msg.headers.front().block_num() );
@@ -1992,6 +2006,7 @@ namespace eosio { namespace ibc {
             if ( check_num == ls.first ){
                // delete lwcls ?
             }
+            elog("*****??");
             return;
          }
 
@@ -2007,8 +2022,8 @@ namespace eosio { namespace ibc {
          for ( auto it = first_itr; it != msg.headers.end(); ++it ){
             par.headers.push_back( *it );
          }
-         ilog("chain_contract->pushsection( par ); ====================");
-//         chain_contract->pushsection( par );
+         ilog("append headers [${from},${to}] to lwcls -----2------",("from",identical_num+1)("to",msg_last_num));
+         chain_contract->pushsection( par );
 
       } else { // store in local_sections
          ilog("store in local_sections -----3-----");
@@ -2105,12 +2120,11 @@ namespace eosio { namespace ibc {
       if( sv.empty() ){
          return lwc_section_type();
       }
-
       std::sort( sv.begin(), sv.end(), []( lwc_section_type s1, lwc_section_type s2 ){
          return s1.first_num < s2.first_num ;
       } );
 
-      return sv[ sv.size() / 2 + 1 ];
+      return sv[ sv.size() / 2 ];
    }
 
    bool ibc_plugin_impl::is_head_catchup() {
@@ -2158,53 +2172,65 @@ namespace eosio { namespace ibc {
          return;
       }
 
+      idump((lwcls));
+
       uint32_t local_safe_head_num = chain_plug->chain().head_block_num() - MinDepth;
+
+      idump((lwcls.last_num )(local_safe_head_num));
 
       if ( lwcls.last_num >= local_safe_head_num ){
          ilog("need not check");
          return;
       }
 
-      block_header ls_last_header;
-      block_header local_safe_header;
+      ilog("~~~~~~~~~~~~1~~~~~~~~~~~~~~~");
+
+      signed_block_ptr check_begin, check_end;
       try {
-         ls_last_header = *(chain_plug->chain().fetch_block_by_number(lwcls.last_num));
-         local_safe_header = *(chain_plug->chain().fetch_block_by_number(local_safe_head_num));
+         check_begin = chain_plug->chain().fetch_block_by_number( lwcls.last_num );
+         check_end = chain_plug->chain().fetch_block_by_number( local_safe_head_num );
       } catch (...) {
-         elog("fetch block by number failed");
+         elog("exception ocurred when fetch block ${n1}, ${n2}",("n1",lwcls.last_num)("n2",local_safe_head_num));
          return;
       }
-
-      auto get_block_header = [=]( uint32_t num ) -> block_header {
-         return  *(chain_plug->chain().fetch_block_by_number(num));
+      
+      if ( check_begin == signed_block_ptr() || check_end == signed_block_ptr() ){
+         elog("internel error, fetch block ${n1}, ${n2} failed",("n1",lwcls.last_num)("n2",local_safe_head_num));
+         return;
+      }
+      
+      auto get_block_ptr = [=]( uint32_t num ) -> signed_block_ptr {
+         return chain_plug->chain().fetch_block_by_number(num);
       };
-
+      
+      ilog("~~~~~~~~~~~~2~~~~~~~~~~~~~~~");
       // check if producer schedule updated
-      if ( ls_last_header.schedule_version < local_safe_header.schedule_version ){
-         // find the last header whose schedule version equal to ls_last_header's schedule version, use binary search
-         block_header search_first, search_middle, search_last;
+      if ( check_begin->schedule_version < check_end->schedule_version ){
+         // find the last header whose schedule version equal to check_begin's schedule version, use binary search
+         signed_block_ptr search_first, search_middle, search_last;
 
-         search_first = ls_last_header;
-         search_last = local_safe_header;
-         search_middle = get_block_header( search_first.block_num() + ( search_last.block_num() - search_first.block_num() ) / 2 );
+         search_first = check_begin;
+         search_last = check_end;
+         search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
 
-         while( !(search_first.schedule_version == ls_last_header.schedule_version &&
-                  get_block_header( search_first.block_num() + 1 ).schedule_version == ls_last_header.schedule_version + 1 ) ){
-            if ( search_middle.schedule_version != ls_last_header.schedule_version  ){
+         while( !(search_first->schedule_version == check_begin->schedule_version &&
+                  get_block_ptr( search_first->block_num() + 1 )->schedule_version == check_begin->schedule_version + 1 ) ){
+            ilog("~~~~~~~~~~~~3~~~~~~~~~~~~~~~");
+            if ( search_middle->schedule_version != check_begin->schedule_version  ){
                search_last = search_middle;
-               search_middle = get_block_header( search_first.block_num() + ( search_last.block_num() - search_first.block_num() ) / 2 );
+               search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
             } else {
                search_first = search_middle;
-               search_middle = get_block_header( search_first.block_num() + ( search_last.block_num() - search_first.block_num() ) / 2 );
+               search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
             }
 
-            if ( search_last.block_num() - search_first.block_num() == 1 ){
+            if ( search_last->block_num() - search_first->block_num() == 1 ){
                elog("internel errror, can't find fit block num for the next schedule_version");
                return;
             }
            ilog("---*---");
          }
-         msg.new_producers_block_num = search_first.block_num();
+         msg.new_producers_block_num = search_first->block_num();
          return;
       }
       msg.new_producers_block_num = 0;
@@ -2454,7 +2480,7 @@ namespace eosio { namespace ibc {
       if ( lwcls.last < min_last_num ){
          lwc_section_request_message msg;
          msg.start_block_num = lwcls.last + 1;
-         msg.end_block_num = min_last_num;
+         msg.end_block_num = min_last_num + 1;
          for( auto &c : connections) {
             if( c->current() ) {
                peer_ilog(c,"sending lwc_section_request_message");
@@ -2944,7 +2970,7 @@ namespace eosio { namespace ibc {
          fc::rand_pseudo_bytes( my->node_id.data(), my->node_id.data_size());
 
          my->keepalive_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
-         my->ticker();
+//         my->ticker();
       } FC_LOG_AND_RETHROW()
    }
 
