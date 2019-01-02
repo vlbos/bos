@@ -1804,7 +1804,7 @@ namespace eosio { namespace ibc {
 
          bool valid = false;
          if (check_id(msg.lwcls.first_num, msg.lwcls.first_id)) {
-            if (msg.lwcls.valid) {
+            if (msg.lwcls.valid && msg.lwcls.lib_num != 0 ) {
                if (check_id(msg.lwcls.lib_num, msg.lwcls.lib_id)) {
                   valid = true;
                } else {
@@ -1837,7 +1837,7 @@ namespace eosio { namespace ibc {
             request.range.second = msg.origtrxs_table_id_range.second;
             send_all( request );
          }
-         ilog("send ibc_trxs_request_message, origtrxs id range:[${f},${t}]",("f",request.range.first)("",request.range.second));
+         ilog("send ibc_trxs_request_message, origtrxs id range:[${f},${t}]",("f",request.range.first)("t",request.range.second));
       }
 
       // check cashtrxs_table_id_range
@@ -1852,7 +1852,7 @@ namespace eosio { namespace ibc {
             request.range.second = msg.cashtrxs_table_seq_num_range.second;
             send_all( request );
          }
-         ilog("send ibc_trxs_request_message, cashtrxs id range:[${f},${t}]",("f",request.range.first)("",request.range.second));
+         ilog("send ibc_trxs_request_message, cashtrxs id range:[${f},${t}]",("f",request.range.first)("t",request.range.second));
       }
 
       // check new_producers_block_num
@@ -2065,7 +2065,7 @@ namespace eosio { namespace ibc {
             auto p = token_contract->get_table_origtrxs_trx_info_by_id( id );
             if ( p.valid() ){
                original_trx_info trx_info = *p;
-               auto info_opt =  get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.id );
+               auto info_opt = get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.id );
                if ( info_opt.valid() ){
                   ret_msg.trxs_rich_info.push_back( *info_opt );
                } else {
@@ -2089,7 +2089,12 @@ namespace eosio { namespace ibc {
          }
       }
 
-      peer_ilog(c,"send ibc_trxs_data_message, size:${s}, id range:[${f},$(t)]",("s",ret_msg.trxs_rich_info.size())("f",ret_msg.trxs_rich_info.begin()->table_id)("t",ret_msg.trxs_rich_info.rbegin()->table_id));
+      if ( ret_msg.trxs_rich_info.empty() ){
+         ilog("empty");
+         return;
+      }
+
+      peer_ilog(c,"send ibc_trxs_data_message, size:${s}, id range:[${f},${t}]",("s",ret_msg.trxs_rich_info.size())("f",ret_msg.trxs_rich_info.begin()->table_id)("t",ret_msg.trxs_rich_info.rbegin()->table_id));
       c->enqueue( ret_msg );
    }
 
