@@ -2607,17 +2607,26 @@ namespace eosio { namespace ibc {
 
       vector<digest_type> result;
 
-      if ( num % 2 == 0 ){
+      if( ids.size() == 1 ){
+         result.push_back( ids.front() );
+         return result;
+      }
+
+      // add the first two elements to merkle path
+      if ( num % 2 == 0 ){ // left side
          result.push_back(ids[num]);
          if ( num == ids.size() - 1 ){
             result.push_back(ids[num]);
          } else {
             result.push_back(ids[num+1]);
          }
+      } else { // right side
+         result.push_back(ids[num-1]);
+         result.push_back(ids[num]);
       }
 
-      uint32_t layer_num = num;
-
+      // append middle path
+      uint32_t idx_in_layer = num;
       while( ids.size() > 1 ) {
          if( ids.size() % 2 )
             ids.push_back(ids.back());
@@ -2627,15 +2636,21 @@ namespace eosio { namespace ibc {
          }
          ids.resize(ids.size() / 2);
 
-         layer_num /= 2;
-         if ( layer_num % 2 == 0 ){
-            if ( layer_num == ids.size() - 1 ){
-               result.push_back( make_canonical_right(ids[layer_num]) );
-            } else {
-               result.push_back( make_canonical_left(ids[layer_num+1]) );
+         if ( ids.size() > 1 ){ // not reach root yet
+            idx_in_layer /= 2;
+            if ( idx_in_layer % 2 == 0 ){ // left side
+               if ( idx_in_layer == ids.size() - 1 ){
+                  result.push_back( make_canonical_right(ids[idx_in_layer]) );
+               } else {
+                  result.push_back( make_canonical_right(ids[idx_in_layer+1]) );
+               }
+            } else { // right side
+               result.push_back( make_canonical_left(ids[idx_in_layer-1]) );
             }
          }
       }
+
+      // append merkle root
       result.push_back( ids.front() );
       return result;
    }
