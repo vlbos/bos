@@ -149,6 +149,11 @@ namespace eosio { namespace ibc {
       transaction_id_type                    orig_trx_id;
    };
 
+   // ---- ibc.token contract others ----
+   struct memo_info_type {
+      name     receiver;
+      string   notes;
+   };
 
 }}
 
@@ -167,4 +172,4 @@ FC_REFLECT( eosio::ibc::original_trx_info, (id)(block_time_slot)(trx_id)(action)
 FC_REFLECT( eosio::ibc::cash_trx_info, (seq_num)(block_time_slot)(trx_id)(action)(orig_trx_id)(orig_trx_block_num) )
 FC_REFLECT( eosio::ibc::cash_action_params, (seq_num)(orig_trx_block_num)(orig_trx_packed_trx_receipt)(orig_trx_merkle_path)(orig_trx_id)(to)(quantity)(memo)(relay) )
 FC_REFLECT( eosio::ibc::cashconfirm_action_params, (cash_trx_block_num)(cash_trx_packed_trx_receipt)(cash_trx_merkle_path)(cash_trx_id)(orig_trx_id) )
-
+FC_REFLECT( eosio::ibc::memo_info_type, (receiver)(notes) )

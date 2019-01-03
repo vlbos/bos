@@ -890,12 +890,59 @@ namespace eosio { namespace ibc {
       void push_cashconfirm_recurse( int index, const std::shared_ptr<std::vector<cashconfirm_action_params>>& params );
       void push_cashconfirm_trxs( const std::vector<ibc_trx_rich_info>& params, uint64_t start_seq_num );
 
+      optional<memo_info_type> get_memo_info( const string& memo );
+
       bool has_contract();
       void get_contract_state();
 
    private:
       name account;
    };
+
+   optional<memo_info_type> ibc_token_contract::get_memo_info( const string& memo ){
+      auto get_item = [=]( string item ) -> string {
+         string search = string(" ") + item + "=";
+         auto pos = memo.find( search );
+         decltype(pos) pos_end;
+         if ( pos !=  std::string::npos ){
+            if ( item == "notes" ){
+               pos_end = memo.size();
+            } else {
+               pos_end = memo.find(" ", pos + search.length());
+               if( pos_end == std::string::npos ) {
+                  pos_end = memo.size();
+               }
+            }
+
+            auto start = pos + search.length();
+            auto count = pos_end - start;
+            auto res = memo.substr( start, count );
+            if( res.length() == 0){
+               elog("ibc system error, memo contain incomplete item");
+            }
+            return res;
+         } else {
+            return string();
+         }
+      };
+
+      string receiver_str = get_item("receiver");
+      string r_str = get_item("r");
+
+      memo_info_type info;
+      if ( receiver_str != string() ){
+         info.receiver = name( receiver_str );
+      } else {
+         if(  r_str == string() ){
+            elog("ibc system error, none of \"receiver\" or \"r\" is provide");
+            return optional<memo_info_type>();
+         }
+         info.receiver = name( r_str );
+      }
+
+      info.notes = get_item("notes");
+      return info;
+   }
 
    bool ibc_token_contract::has_contract(){
       return account_has_contract( account );
@@ -1044,7 +1091,7 @@ namespace eosio { namespace ibc {
          if (next_index < params->size()) {
             push_cash_recurse( next_index, params, next_seq_num );
          } else {
-            ilog("successfully pushed all ${sum} cash transactions, which belongs to blocks [${f},${t}]",
+            ilog("all ${sum} cash transactions have tried push, which belongs to blocks [${f},${t}]",
                  ("sum",params->size())("f",params->front().orig_trx_block_num)("t",params->back().orig_trx_block_num));
          }
       };
@@ -1086,7 +1133,13 @@ namespace eosio { namespace ibc {
          auto opt = get_original_action_params( trx.packed_trx_receipt );
          if ( opt.valid() ){
             transfer_action_type actn = *opt;
-            par.to = actn.to;
+
+            auto info = get_memo_info( actn.memo );
+            if ( ! info.valid() ){
+               break;
+            }
+
+            par.to = info->receiver;
             par.quantity = actn.quantity;
             par.memo = "ibc trx";
             par.relay = my_impl->relay;
