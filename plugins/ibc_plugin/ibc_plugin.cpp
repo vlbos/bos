@@ -690,11 +690,11 @@ namespace eosio { namespace ibc {
       void blockmerkle( const blockroot_merkle_type& data );
 
       // tables
-      optional<section_type> get_sections_tb_reverse_nth_section( uint64_t nth = 0 ) const;
-      optional<block_header_state_type> get_chaindb_tb_bhs_by_block_num( uint64_t num ) const;
-      block_id_type get_chaindb_tb_block_id_by_block_num( uint64_t num ) const;
-      optional<global_state_ibc_chain> get_global_singleton() const;
-      void get_blkrtmkls_tb() ;
+      optional<section_type>              get_sections_tb_reverse_nth_section( uint64_t nth = 0 ) const;
+      optional<block_header_state_type>   get_chaindb_tb_bhs_by_block_num( uint64_t num ) const;
+      block_id_type                       get_chaindb_tb_block_id_by_block_num( uint64_t num ) const;
+      optional<global_state_ibc_chain>    get_global_singleton() const;
+      void                                get_blkrtmkls_tb() ;
 
       // other
       bool has_contract() const;
@@ -871,17 +871,17 @@ namespace eosio { namespace ibc {
       void cashconfirm( const cashconfirm_action_params& p );
 
       // tables
-      range_type get_table_origtrxs_id_range();
-      optional<original_trx_info> get_table_origtrxs_trx_info_by_id( uint64_t id );
-      range_type get_table_cashtrxs_seq_num_range();
-      optional<cash_trx_info> get_table_cashtrxs_trx_info_by_seq_num( uint64_t seq_num );
-      optional<global_state_ibc_token> get_global_state_singleton();
-      optional<global_mutable_ibc_token> get_global_mutable_singleton();
+      range_type                          get_table_origtrxs_id_range();
+      optional<original_trx_info>         get_table_origtrxs_trx_info_by_id( uint64_t id );
+      range_type                          get_table_cashtrxs_seq_num_range();
+      optional<cash_trx_info>             get_table_cashtrxs_trx_info_by_seq_num( uint64_t seq_num );
+      optional<global_state_ibc_token>    get_global_state_singleton();
+      optional<global_mutable_ibc_token>  get_global_mutable_singleton();
 
       // other
-      optional<transaction> get_transaction( std::vector<char> packed_trx_receipt );
-      optional<transfer_action_type> get_original_action_params( std::vector<char> packed_trx_receipt, transaction_id_type* trx_id_ptr = nullptr );
-      optional<cash_action_params> get_cash_action_params( std::vector<char> packed_trx_receipt );
+      optional<transaction>            get_transaction( std::vector<char> packed_trx_receipt );
+      optional<transfer_action_type>   get_original_action_params( std::vector<char> packed_trx_receipt, transaction_id_type* trx_id_ptr = nullptr );
+      optional<cash_action_params>     get_cash_action_params( std::vector<char> packed_trx_receipt );
 
       transaction_id_type last_origtrx_pushed;  // note: update this even push failed
       void push_cash_recurse( int index, const std::shared_ptr<std::vector<cash_action_params>>& params, uint32_t start_seq_num );
@@ -2681,6 +2681,7 @@ namespace eosio { namespace ibc {
       }
 
       ///< step one: let lwcls reach its minimum length
+      ilog("--- step one ---");
 
       // get lwcls
       auto opt_sctn = chain_contract->get_sections_tb_reverse_nth_section();
@@ -2731,13 +2732,15 @@ namespace eosio { namespace ibc {
       }
 
       ///< step two: send all transactions which should validate within this lwcls
+      ilog("--- step two ---");
       std::vector<ibc_trx_rich_info> orig_trxs_to_push;
       std::vector<ibc_trx_rich_info> cash_trxs_to_push;
 
       if ( lwcls.valid ){
-         uint32_t lib_num =  std::max( lwcls.first, lwcls.last - chain_contract->lwc_lib_depth );
+         uint32_t lib_num =  std::max( lwcls.first, lwcls.last > chain_contract->lwc_lib_depth ? lwcls.last - chain_contract->lwc_lib_depth : 1 );
 
          // --- local_origtrxs ---
+         ilog("local_origtrxs -- ");
          auto range = token_contract->get_table_cashtrxs_seq_num_range();
          if ( range.first == 0 ){
             for( const auto& t : local_origtrxs.get<by_id>( ) ) {
@@ -2764,6 +2767,7 @@ namespace eosio { namespace ibc {
          }
 
          // --- local_cashtrxs ---
+         ilog("local_cashtrxs -- ");
          auto gm_opt = token_contract->get_global_mutable_singleton();
          if ( !gm_opt.valid() ){
             elog("internal error, failed to get global_mutable_singleton");
@@ -2781,9 +2785,11 @@ namespace eosio { namespace ibc {
       }
 
       ///< step three: check if all related trxs with lwcls in local_origtrxs and local_cashtrxs handled
+      ilog("--- step three ---");
       bool all_b = false, orig_b = false, cash_b = false;
       // --- check local_origtrxs ---
-      if ( orig_trxs_to_push.back().trx_id == token_contract->last_origtrx_pushed ){
+
+      if ( orig_trxs_to_push.empty() || orig_trxs_to_push.back().trx_id == token_contract->last_origtrx_pushed ){
          orig_b = true;
       }
 
@@ -2793,13 +2799,17 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      auto actn_params_opt = token_contract->get_cash_action_params( cash_trxs_to_push.back().packed_trx_receipt );
-      if ( ! actn_params_opt.valid() ){
-         elog("internal error, failed to get_cash_action_params");
-         return;
-      }
-      if ( gm_opt->cash_seq_num == actn_params_opt->seq_num ){
+      if ( cash_trxs_to_push.empty() ){
          cash_b = true;
+      } else {
+         auto actn_params_opt = token_contract->get_cash_action_params( cash_trxs_to_push.back().packed_trx_receipt );
+         if ( ! actn_params_opt.valid() ){
+            elog("internal error, failed to get_cash_action_params");
+            return;
+         }
+         if ( gm_opt->cash_seq_num == actn_params_opt->seq_num ){
+            cash_b = true;
+         }
       }
 
       if ( orig_b && cash_b ){
@@ -2811,6 +2821,7 @@ namespace eosio { namespace ibc {
       }
 
       ///< step four: if has new trxs, request the next section range
+      ilog("--- step four ---");
       {
          uint32_t start_blk_num = 0;
          auto _it_orig = local_origtrxs.get<by_block_num>().lower_bound( lwcls.last + 1 );
@@ -2844,7 +2855,7 @@ namespace eosio { namespace ibc {
             if ( ! found ){
                lwc_section_request_message msg;
                msg.start_block_num = start_blk_num;
-               msg.end_block_num = start_blk_num - chain_contract->lwc_lib_depth;
+               msg.end_block_num = start_blk_num + chain_contract->lwc_lib_depth;
                send_all( msg );
             }
          }
@@ -2852,9 +2863,9 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_ibc_core_timer( ){
-      try {
+//      try {
          ibc_core_checker();
-      } FC_LOG_AND_DROP()
+//      } FC_LOG_AND_DROP()
 
       ibc_core_timer->expires_from_now( ibc_core_interval );
       ibc_core_timer->async_wait( [this](boost::system::error_code ec) {
