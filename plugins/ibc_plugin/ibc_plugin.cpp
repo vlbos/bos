@@ -663,7 +663,7 @@ namespace eosio { namespace ibc {
    optional<signed_transaction> get_signed_transaction_from_action( action actn ){
       if ( my_impl->relay_private_key == chain::private_key_type() ){
          elog("ibc relay private key not found, can not execute action");
-         return optinal<signed_transaction>();
+         return optional<signed_transaction>();
       }
       signed_transaction trx;
       trx.actions.emplace_back( actn );
@@ -883,6 +883,7 @@ namespace eosio { namespace ibc {
       optional<transfer_action_type> get_original_action_params( std::vector<char> packed_trx_receipt, transaction_id_type* trx_id_ptr = nullptr );
       optional<cash_action_params> get_cash_action_params( std::vector<char> packed_trx_receipt );
 
+      transaction_id_type last_origtrx_pushed;  // note: update this even push failed
       void push_cash_recurse( int index, const std::shared_ptr<std::vector<cash_action_params>>& params, uint32_t start_seq_num );
       void push_cash_trxs( const std::vector<ibc_trx_rich_info>& params, uint32_t start_seq_num );
 
@@ -1003,10 +1004,10 @@ namespace eosio { namespace ibc {
    
    optional<transfer_action_type> ibc_token_contract::get_original_action_params( std::vector<char> packed_trx_receipt, transaction_id_type* trx_id_ptr ){
       try {
-         transaction trx_opt = get_transaction( packed_trx_receipt );
+         auto trx_opt = get_transaction( packed_trx_receipt );
          if ( trx_opt.valid() ){
             if ( trx_id_ptr != nullptr ){
-               *trx_id_ptr = trx_opt.id();
+               *trx_id_ptr = trx_opt->id();
             }
             return fc::raw::unpack<transfer_action_type>( trx_opt->actions.front().data );
          }
@@ -1016,7 +1017,7 @@ namespace eosio { namespace ibc {
 
    optional<cash_action_params> ibc_token_contract::get_cash_action_params( std::vector<char> packed_trx_receipt ){
       try {
-         transaction trx_opt = get_transaction( packed_trx_receipt );
+         auto trx_opt = get_transaction( packed_trx_receipt );
          if ( trx_opt.valid() ){
             return fc::raw::unpack<cash_action_params>( trx_opt->actions.front().data );
          }
@@ -1037,6 +1038,7 @@ namespace eosio { namespace ibc {
             ilog("pushed cash transaction: ${id}", ( "id", trx_id ));
             next_seq_num += 1;
          }
+         last_origtrx_pushed = params->at(index).orig_trx_id;
 
          int next_index = index + 1;
          if (next_index < params->size()) {
@@ -1122,7 +1124,7 @@ namespace eosio { namespace ibc {
 
          int next_index = index + 1;
          if (next_index < params->size()) {
-            push_cash_recurse( next_index, params );
+            push_cashconfirm_recurse( next_index, params );
          } else {
             ilog("successfully pushed all ${sum} cashconfirm transactions, which belongs to blocks [${f},${t}]",
                ("sum",params->size())("f",params->front().cash_trx_block_num)("t",params->back().cash_trx_block_num));
@@ -1167,7 +1169,7 @@ namespace eosio { namespace ibc {
             elog("failed to get original action parameters from orig_trx_packed_trx_receipt");
             return;
          }
-         transfer_action_info orig_params = *opt_orig;
+         transfer_action_type orig_params = *opt_orig;
 
          if ( cash_params.seq_num != next_seq_num ){
             elog("cash_params.seq_num ${n1} != next_seq_num ${n2}", ("n1",cash_params.seq_num)("n2",next_seq_num));
@@ -2678,7 +2680,7 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      ///< first step: let lwcls reach its minimum length
+      ///< step one: let lwcls reach its minimum length
 
       // get lwcls
       auto opt_sctn = chain_contract->get_sections_tb_reverse_nth_section();
@@ -2728,13 +2730,14 @@ namespace eosio { namespace ibc {
          }
       }
 
-      ///< second step: send all transactions which should validate within this lwcls
+      ///< step two: send all transactions which should validate within this lwcls
+      std::vector<ibc_trx_rich_info> orig_trxs_to_push;
+      std::vector<ibc_trx_rich_info> cash_trxs_to_push;
 
       if ( lwcls.valid ){
          uint32_t lib_num =  std::max( lwcls.first, lwcls.last - chain_contract->lwc_lib_depth );
 
          // --- local_origtrxs ---
-         std::vector<ibc_trx_rich_info> orig_trxs_to_push;
          auto range = token_contract->get_table_cashtrxs_seq_num_range();
          if ( range.first == 0 ){
             for( const auto& t : local_origtrxs.get<by_id>( ) ) {
@@ -2761,8 +2764,6 @@ namespace eosio { namespace ibc {
          }
 
          // --- local_cashtrxs ---
-         std::vector<ibc_trx_rich_info> cash_trxs_to_push;
-
          auto gm_opt = token_contract->get_global_mutable_singleton();
          if ( !gm_opt.valid() ){
             elog("internal error, failed to get global_mutable_singleton");
@@ -2779,41 +2780,75 @@ namespace eosio { namespace ibc {
          }
       }
 
-      ///< third step: check if all related trxs with lwcls in local_origtrxs and local_cashtrxs handled
-
-      bool all_sended = false;
-      if ( lwcls.last >= min_last_num ){
-
-         // 判断此section最小范围内的 local_cashtrxs 已全部发送完成
-         bool all_cashtrxs_sended = false;
-         auto opt_gm = token_contract->get_global_mutable_singleton();
-         if ( !opt_gm.valid() ){
-            elog("error");
-            return;
-         }
-         uint32_t last_cash_seq_num = opt_gm->cash_seq_num;
-
-         auto it = local_cashtrxs.get<by_id>().find(last_cash_seq_num);
-         if ( it == local_cashtrxs.end() || (++it)->block_num > min_last_num ) {
-            all_cashtrxs_sended = true;
-         }
-
-         //  判断此section最小范围内的origtrxs已全部发送完成或尝试了足够的次数。？？
-
-
-
-
-         if ( all_cashtrxs_sended == true && true ){
-            all_sended = true;
-         }
+      ///< step three: check if all related trxs with lwcls in local_origtrxs and local_cashtrxs handled
+      bool all_b = false, orig_b = false, cash_b = false;
+      // --- check local_origtrxs ---
+      if ( orig_trxs_to_push.back().trx_id == token_contract->last_origtrx_pushed ){
+         orig_b = true;
       }
 
-      if ( all_sended ){
-         // 查看是否已经有新的trx
-         // 如果有,查看是否有新的 section
-         // 如果有push， 如果没有 请求
+      auto gm_opt = token_contract->get_global_mutable_singleton();
+      if ( !gm_opt.valid() ){
+         elog("internal error, failed to get global_mutable_singleton");
+         return;
       }
 
+      auto actn_params_opt = token_contract->get_cash_action_params( cash_trxs_to_push.back().packed_trx_receipt );
+      if ( ! actn_params_opt.valid() ){
+         elog("internal error, failed to get_cash_action_params");
+         return;
+      }
+      if ( gm_opt->cash_seq_num == actn_params_opt->seq_num ){
+         cash_b = true;
+      }
+
+      if ( orig_b && cash_b ){
+         ilog("all related trxs in local_origtrxs and local_cashtrxs had handled");
+         all_b = true;
+      } else {
+         ilog("some trxs didn't handle yet");
+         return;
+      }
+
+      ///< step four: if has new trxs, request the next section range
+      {
+         uint32_t start_blk_num = 0;
+         auto _it_orig = local_origtrxs.get<by_block_num>().lower_bound( lwcls.last + 1 );
+         auto it_orig = local_origtrxs.project<0>(_it_orig);
+         if (  it_orig != local_origtrxs.end() ){
+            start_blk_num = it_orig->block_num;
+         }
+
+         auto it_cash_ = local_cashtrxs.get<by_block_num>().lower_bound( lwcls.last + 1 );
+         auto it_cash = local_cashtrxs.project<0>(it_cash_);
+         if (  it_cash != local_cashtrxs.end() ){
+            start_blk_num = std::min( it_orig->block_num, it_cash->block_num );
+         }
+
+         for ( const auto& num : new_prod_blk_nums ){
+            if ( lwcls.last <= num && num <= start_blk_num ){
+               start_blk_num = std::min( start_blk_num, num );
+            }
+         }
+
+         if ( start_blk_num != 0 ){
+            // check if has relate section in local store.
+            bool found = false;
+            for( auto it = local_sections.rbegin(); it != local_sections.rend(); --it ){
+               if ( it->first <= start_blk_num && start_blk_num <= it->last ){
+                  found = true;
+                  chain_contract->pushsection( it->section_data );
+               }
+            }
+
+            if ( ! found ){
+               lwc_section_request_message msg;
+               msg.start_block_num = start_blk_num;
+               msg.end_block_num = start_blk_num - chain_contract->lwc_lib_depth;
+               send_all( msg );
+            }
+         }
+      }
    }
 
    void ibc_plugin_impl::start_ibc_core_timer( ){
