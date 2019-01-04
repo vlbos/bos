@@ -1023,8 +1023,10 @@ namespace eosio { namespace ibc {
          auto obj = *p;
          fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
          global_state_ibc_token result;
-         fc::raw::unpack( ds, result );
-         return result;
+         try {
+            fc::raw::unpack( ds, result );
+            return result;
+         } FC_LOG_AND_DROP()
       }
       return optional<global_state_ibc_token>();
    }
@@ -1035,8 +1037,10 @@ namespace eosio { namespace ibc {
          auto obj = *p;
          fc::datastream<const char *> ds(obj.value.data(), obj.value.size());
          global_mutable_ibc_token result;
-         fc::raw::unpack( ds, result );
-         return result;
+         try {
+            fc::raw::unpack( ds, result );
+            return result;
+         } FC_LOG_AND_DROP()
       }
       return optional<global_mutable_ibc_token>();
    }
@@ -2789,21 +2793,20 @@ namespace eosio { namespace ibc {
          }
       }
 
-      // check if lwcls reached the minimum range
+      // check if lwcls reached the minimum range, if not, send lwc_section_request_message
       if ( lwcls.last < min_last_num ){
          lwc_section_request_message msg;
          msg.start_block_num = lwcls.last + 1;
          msg.end_block_num = min_last_num + 1;
          for( auto &c : connections) {
             if( c->current() ) {
-               peer_ilog(c,"sending lwc_section_request_message");
-               idump((msg));
+               peer_ilog(c, "send lwc_section_request_message [${from},${to})",("from",msg.start_block_num)("to",msg.end_block_num));
                c->enqueue( msg );
             }
          }
       }
 
-      ///< step two: send all transactions which should validate within this lwcls
+      ///< step two: push all transactions which should validate within this lwcls first to lib block
       ilog("--- step two ---");
       std::vector<ibc_trx_rich_info> orig_trxs_to_push;
       std::vector<ibc_trx_rich_info> cash_trxs_to_push;
@@ -2947,10 +2950,17 @@ namespace eosio { namespace ibc {
             }
             ilog("===2===");
             if ( ! found ){
+
                lwc_section_request_message msg;
                msg.start_block_num = start_blk_num;
                msg.end_block_num = start_blk_num + chain_contract->lwc_lib_depth;
-               send_all( msg );
+
+               for( auto &c : connections) {
+                  if( c->current() ) {
+                     peer_ilog(c, "send lwc_section_request_message [${from},${to})",("from",msg.start_block_num)("to",msg.end_block_num));
+                     c->enqueue( msg );
+                  }
+               }
             }
          }
          ilog("===3===");
