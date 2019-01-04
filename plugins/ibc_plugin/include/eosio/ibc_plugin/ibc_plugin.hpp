@@ -88,7 +88,6 @@ namespace eosio { namespace ibc {
 
    struct transfer_action_info {
       name    contract;
-      name    action; // one of "transfer"_n "withdraw"_n "cash"_n
       name    from;
       asset   quantity;
    };
@@ -165,7 +164,7 @@ FC_REFLECT( eosio::ibc::block_header_state_type, (block_num)(block_id)(header)(a
 FC_REFLECT( eosio::ibc::blockroot_merkle_type, (block_num)(merkle) )
 
 FC_REFLECT( eosio::ibc::transfer_action_type, (from)(to)(quantity)(memo) )
-FC_REFLECT( eosio::ibc::transfer_action_info, (contract)(action)(from)(quantity) )
+FC_REFLECT( eosio::ibc::transfer_action_info, (contract)(from)(quantity) )
 FC_REFLECT( eosio::ibc::global_state_ibc_token, (ibc_contract)(peerchain_ibc_token_contract)(max_origtrxs_table_records)(cache_cashtrxs_table_records)(max_original_trxs_per_block)(active)(lock_start_time)(lock_minutes) )
 FC_REFLECT( eosio::ibc::global_mutable_ibc_token, (cash_seq_num)(last_finished_trx_block_time_slot)(current_block_time_slot)(current_block_trxs)(origtrxs_tb_next_id) )
 FC_REFLECT( eosio::ibc::original_trx_info, (id)(block_time_slot)(trx_id)(action) )

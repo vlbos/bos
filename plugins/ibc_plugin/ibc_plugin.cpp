@@ -606,6 +606,7 @@ namespace eosio { namespace ibc {
             } FC_LOG_AND_DROP()
             elog("push_transaction failed");
          } else {
+            ilog("************|||******1******");
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
             ilog("pushed transaction: ${id}", ( "id", trx_id ));
          }
@@ -1081,12 +1082,14 @@ namespace eosio { namespace ibc {
             } FC_LOG_AND_DROP()
             elog("push cash transaction failed, index ${i}",("i",index));
          } else {
+            ilog("************|||******11******");
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
             ilog("pushed cash transaction: ${id}", ( "id", trx_id ));
             next_seq_num += 1;
          }
+         ilog("--11--0");
          last_origtrx_pushed = params->at(index).orig_trx_id;
-
+         ilog("--12--0");
          int next_index = index + 1;
          if (next_index < params->size()) {
             push_cash_recurse( next_index, params, next_seq_num );
@@ -1141,7 +1144,7 @@ namespace eosio { namespace ibc {
 
             par.to = info->receiver;
             par.quantity = actn.quantity;
-            par.memo = "ibc trx";
+            par.memo = "memo";
             par.relay = my_impl->relay;
             actions.push_back(par);
          } else {
@@ -1171,6 +1174,7 @@ namespace eosio { namespace ibc {
             elog("push cashconfirm transaction failed, ${s} succeed, ${l} left",("s",index)("l",params->size() - index));
             return;
          } else {
+            ilog("************|||******22*****");
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
             ilog("pushed cashconfirm transaction: ${id}", ( "id", trx_id ));
          }
@@ -2251,8 +2255,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data_message &msg) {
-      peer_ilog(c, "received lwc_section_data_message");
-
+      peer_ilog(c, "received lwc_section_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
 
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !p.valid() ){
@@ -2340,7 +2343,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_request_message &msg ) {
-      peer_ilog(c, "received ibc_trxs_request_message, id range [${f},${t}]",("f",msg.range.first)("t",msg.range.second));
+      peer_ilog(c, "received ibc_trxs_request_message, table ${tb}, id range [${f},${t}]",("tb",msg.table)("f",msg.range.first)("t",msg.range.second));
 
       ibc_trxs_data_message ret_msg;
       ret_msg.table = msg.table;
@@ -2384,7 +2387,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_data_message &msg ) {
-      peer_ilog(c, "received ibc_trxs_data_message");
+      peer_ilog(c, "received ibc_trxs_request_message, table ${tb}, id range [${f},${t}]", ("tb",msg.table)("f",msg.trxs_rich_info.front().table_id)("t",msg.trxs_rich_info.back().table_id));
 
       if ( msg.table == N(origtrxs) ) {
          for( const auto& trx_info : msg.trxs_rich_info ){
@@ -2392,6 +2395,7 @@ namespace eosio { namespace ibc {
                local_origtrxs.insert(trx_info);
             }
          }
+         return;
       }
 
       if ( msg.table == N(cashtrxs) ){
@@ -2657,7 +2661,7 @@ namespace eosio { namespace ibc {
 
 
    optional<ibc_trx_rich_info> ibc_plugin_impl::get_ibc_trx_rich_info( uint32_t block_time_slot, transaction_id_type trx_id, uint64_t table_id ){
-      auto head_num = chain_plug->chain().head_block_num();
+      auto head_num = chain_plug->chain().fork_db_head_block_num(); // .head_block_num(); to do
       auto head_slot = chain_plug->chain().fetch_block_by_number(head_num)->timestamp.slot;
 
       if ( head_slot < block_time_slot ){
@@ -2772,8 +2776,8 @@ namespace eosio { namespace ibc {
          ++it_orig;
       }
 
-      auto it_cash_ = local_cashtrxs.get<by_block_num>().lower_bound( lwcls.first );
-      auto it_cash = local_cashtrxs.project<0>(it_cash_);
+      auto _it_cash = local_cashtrxs.get<by_block_num>().lower_bound( lwcls.first );
+      auto it_cash = local_cashtrxs.project<0>(_it_cash);
       while ( it_cash != local_cashtrxs.end() && it_cash->block_num < min_last_num ){
          min_last_num = std::max( min_last_num, it_cash->block_num + chain_contract->lwc_lib_depth );
          ++it_cash;
@@ -2825,6 +2829,7 @@ namespace eosio { namespace ibc {
                ++it;
                while ( it != local_origtrxs.end() && it->block_num <= lib_num ){
                   orig_trxs_to_push.push_back( *it );
+                  ++it;
                }
             } else {
                ilog("internal error, failed to get cash transaction infomation of seq_num ${n}",("n",range.second));
@@ -2842,14 +2847,21 @@ namespace eosio { namespace ibc {
             return;
          }
          uint32_t last_cash_seq_num = gm_opt->cash_seq_num;
+
+         ilog("last_cash_seq_num + 1 ${n}",("n",last_cash_seq_num + 1));
          auto it = local_cashtrxs.get<by_id>().find(last_cash_seq_num + 1);
+         ilog("it->block_num ${n1}<= lib_num${n2} ",("n1",it->block_num)("n2",lib_num));
          while ( it != local_cashtrxs.end() && it->block_num <= lib_num ){
+            ilog("&*&*&");
             cash_trxs_to_push.push_back( *it );
+            ++it;
          }
 
          if ( !cash_trxs_to_push.empty() ){
+            ilog("!cash_trxs_to_push.empty() ${n}",("n",last_cash_seq_num + 1));
             token_contract->push_cashconfirm_trxs( cash_trxs_to_push, last_cash_seq_num + 1 );
          }
+      ilog("~1~~~");
       }
 
       ///< step three: check if all related trxs with lwcls in local_origtrxs and local_cashtrxs handled
@@ -2892,34 +2904,48 @@ namespace eosio { namespace ibc {
       ilog("--- step four ---");
       {
          uint32_t start_blk_num = 0;
-         auto _it_orig = local_origtrxs.get<by_block_num>().lower_bound( lwcls.last + 1 );
-         auto it_orig = local_origtrxs.project<0>(_it_orig);
+         auto __it_orig = local_origtrxs.get<by_block_num>().lower_bound( lwcls.last + 1 );
+         auto it_orig = local_origtrxs.project<0>(__it_orig);
          if (  it_orig != local_origtrxs.end() ){
             start_blk_num = it_orig->block_num;
+            ilog("yes origtrxs has new trxs,${n}",("n",start_blk_num));
          }
 
-         auto it_cash_ = local_cashtrxs.get<by_block_num>().lower_bound( lwcls.last + 1 );
-         auto it_cash = local_cashtrxs.project<0>(it_cash_);
+         auto __it_cash = local_cashtrxs.get<by_block_num>().lower_bound( lwcls.last + 1 );
+         auto it_cash = local_cashtrxs.project<0>(__it_cash);
          if (  it_cash != local_cashtrxs.end() ){
-            start_blk_num = std::min( it_orig->block_num, it_cash->block_num );
+            if ( start_blk_num != 0 ){
+               start_blk_num = std::min( start_blk_num, it_cash->block_num );
+            } else {
+               start_blk_num = it_cash->block_num;
+            }
+            ilog("yes cashtrxs has new trxs,${n}",("n",start_blk_num));
          }
 
          for ( const auto& num : new_prod_blk_nums ){
             if ( lwcls.last <= num && num <= start_blk_num ){
-               start_blk_num = std::min( start_blk_num, num );
+               if ( start_blk_num != 0 ){
+                  start_blk_num = std::min( start_blk_num, num );
+               } else {
+                  start_blk_num = num;
+               }
             }
          }
 
          if ( start_blk_num != 0 ){
             // check if has relate section in local store.
+
+            ilog("===1===");
             bool found = false;
-            for( auto it = local_sections.rbegin(); it != local_sections.rend(); --it ){
+            for( auto it = local_sections.rbegin(); it != local_sections.rend(); ++it ){
+               ilog("===111===");
                if ( it->first <= start_blk_num && start_blk_num <= it->last ){
                   found = true;
                   chain_contract->pushsection( it->section_data );
+                  break;
                }
             }
-
+            ilog("===2===");
             if ( ! found ){
                lwc_section_request_message msg;
                msg.start_block_num = start_blk_num;
@@ -2927,6 +2953,7 @@ namespace eosio { namespace ibc {
                send_all( msg );
             }
          }
+         ilog("===3===");
       }
    }
 
