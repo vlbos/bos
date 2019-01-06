@@ -177,6 +177,7 @@ namespace eosio {
       };
 
       struct ibc_trxs_request_message {
+         ibc_trxs_request_message():table(),range(){}
          name        table;
          range_type  range;
       };
