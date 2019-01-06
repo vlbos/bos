@@ -153,9 +153,6 @@ namespace eosio {
          incremental_merkle      blockroot_merkle;
       };
 
-      /**
-       * Left closed right open interval, such as [1000,1050)
-       */
       struct lwc_section_request_message {
          lwc_section_request_message():start_block_num(0),end_block_num(0){}
          uint32_t start_block_num;
