@@ -6,6 +6,7 @@
 
 #include <appbase/application.hpp>
 #include <eosio/chain_plugin/chain_plugin.hpp>
+#include <eosio/chain/plugin_interface.hpp>
 #include <eosio/ibc_plugin/protocol.hpp>
 
 namespace eosio { namespace ibc {
@@ -113,14 +114,14 @@ namespace eosio { namespace ibc {
 
    struct original_trx_info {
       uint64_t                id; // auto-increment
-      uint32_t                block_time_slot; // new record must not decrease time slot
+      uint64_t                block_time_slot; // new record must not decrease time slot
       transaction_id_type     trx_id;
       transfer_action_info    action; // very important infomation, used when execute rollback
    };
 
    struct cash_trx_info {
       uint64_t              seq_num; // set by seq_num in cash action, and must be increase one by one, and start from zero
-      uint32_t              block_time_slot;
+      uint64_t              block_time_slot;
       transaction_id_type   trx_id;
       transfer_action_type  action;
       transaction_id_type   orig_trx_id;

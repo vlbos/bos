@@ -49,6 +49,7 @@ namespace eosio { namespace ibc {
    using fc::time_point_sec;
    using eosio::chain::transaction_id_type;
    using eosio::chain::name;
+   using namespace eosio::chain::plugin_interface;
    using mvo = fc::mutable_variant_object;
    namespace bip = boost::interprocess;
 
@@ -56,7 +57,9 @@ namespace eosio { namespace ibc {
    const static uint32_t MaxSectionLength = 30;
    const static uint32_t MinDepth = 50;   // =12*4+2, never access blocks within this depth
    const static uint32_t BlocksPerSecond = 2;
-
+   const static uint32_t MaxLocalOrigtrxsCache = 100*1000;
+   const static uint32_t MaxLocalCashtrxsCache = 100*1000;
+   const static uint32_t MaxLocalOldSectionsCache = 5;
 
 
    class connection;
@@ -228,11 +231,10 @@ namespace eosio { namespace ibc {
       void start_ibc_heartbeat_timer( );
 
       incremental_merkle get_brtm_from_cache( uint32_t block_num );
+      uint32_t get_safe_head_tslot();
 
       void new_prod_blk_num_insert( uint32_t num );
       optional<ibc_trx_rich_info> get_ibc_trx_rich_info( uint32_t block_time_slot, transaction_id_type trx_id, uint64_t table_id );
-
-
 
       void ibc_core_checker( );
       void start_ibc_core_timer( );
@@ -557,7 +559,7 @@ namespace eosio { namespace ibc {
    // ---- contract exist check ----
    bool account_has_contract( name account ){
       auto ro_api = app().get_plugin<chain_plugin>().get_read_only_api();
-      eosio::chain_apis::read_only::get_code_hash_params params{account};
+      chain_apis::read_only::get_code_hash_params params{account};
       try {
          auto result = ro_api.get_code_hash( params );
          if ( result.code_hash != fc::sha256() ){
@@ -610,7 +612,7 @@ namespace eosio { namespace ibc {
          }
       };
 
-      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object( mvo(packed_transaction(trx)) ), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object( mvo(packed_transaction(trx)) ), next );
    }
 
    void push_recurse(int index, const std::shared_ptr<std::vector<signed_transaction>>& params, bool allow_failure ) {
@@ -635,7 +637,7 @@ namespace eosio { namespace ibc {
          }
       };
 
-      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction( params->at(index) ))), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object(mvo(packed_transaction( params->at(index) ))), next );
    }
 
    void push_transactions( const std::vector<signed_transaction>& params, bool allow_failure ){
@@ -963,7 +965,29 @@ namespace eosio { namespace ibc {
    }
 
    range_type ibc_token_contract::get_table_origtrxs_id_range() {
-      return get_table_primary_key_range( account, account, N(origtrxs) );
+      auto range = get_table_primary_key_range( account, account, N(origtrxs) );
+      uint32_t safe_tslot = my_impl->get_safe_head_tslot();
+
+      chain_apis::read_only::get_table_rows_params par;
+      par.json = true;  // must be true
+      par.code = account;
+      par.scope = account.to_string();
+      par.table = N(origtrxs);
+      par.table_key = "tslot";
+      par.lower_bound = to_string(safe_tslot);
+      par.upper_bound = "";   // to last
+      par.limit = 1;
+      par.key_type = "i64";
+      par.index_position = "2";  // by_slot
+      try {
+         auto result = my_impl->chain_plug->get_read_only_api().get_table_rows( par );
+         if ( result.rows.size() != 0 ){
+            auto info = result.rows.front().as<original_trx_info>();
+            range.second = info.id;
+         }
+      } FC_LOG_AND_DROP()
+
+      return range;
    }
 
    optional<original_trx_info> ibc_token_contract::get_table_origtrxs_trx_info_by_id( uint64_t id ) {
@@ -989,7 +1013,29 @@ namespace eosio { namespace ibc {
    }
 
    range_type ibc_token_contract::get_table_cashtrxs_seq_num_range() {
-      return get_table_primary_key_range( account, account, N(cashtrxs) );
+      auto range = get_table_primary_key_range( account, account, N(cashtrxs) );
+      uint32_t safe_tslot = my_impl->get_safe_head_tslot();
+
+      chain_apis::read_only::get_table_rows_params par;
+      par.json = true;  // must be true
+      par.code = account;
+      par.scope = account.to_string();
+      par.table = N(cashtrxs);
+      par.table_key = "tslot";
+      par.lower_bound = to_string(safe_tslot);
+      par.upper_bound = "";   // to last
+      par.limit = 1;
+      par.key_type = "i64";
+      par.index_position = "2";  // by_slot
+      try {
+         auto result = my_impl->chain_plug->get_read_only_api().get_table_rows( par );
+         if ( result.rows.size() != 0 ){
+            auto info = result.rows.front().as<cash_trx_info>();
+            range.second = info.seq_num;
+         }
+      } FC_LOG_AND_DROP()
+
+      return range;
    }
 
    optional<cash_trx_info> ibc_token_contract::get_table_cashtrxs_trx_info_by_seq_num( uint64_t seq_num ) {
@@ -1123,7 +1169,7 @@ namespace eosio { namespace ibc {
          elog("get_signed_transaction_from_action failed");
          return;
       }
-      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
    }
 
    void ibc_token_contract::push_cash_trxs( const std::vector<ibc_trx_rich_info>& params, uint32_t start_seq_num ){
@@ -1208,7 +1254,7 @@ namespace eosio { namespace ibc {
          elog("get_signed_transaction_from_action failed");
          return;
       }
-      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
    }
 
    void ibc_token_contract::push_cashconfirm_trxs( const std::vector<ibc_trx_rich_info>& params, uint64_t start_seq_num ) {
@@ -1861,24 +1907,32 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::accepted_block_header(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+      fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id));
    }
 
    void ibc_plugin_impl::accepted_block(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+      fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id));
    }
 
    void ibc_plugin_impl::irreversible_block(const block_state_ptr& block) {
-//      fc_dlog(logger,"signaled, id = ${id}",("id", block->id));
+      /*fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id));*/
       blockroot_merkle_type brtm;
       brtm.block_num = block->block_num;
       brtm.merkle = block->blockroot_merkle;
 
       blockroot_merkle_cache.push_back( brtm );
-      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*2 ){
+      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*2 ){ // two hours
          blockroot_merkle_cache.erase(blockroot_merkle_cache.begin());
       }
-      // todo 每小时记录一个blockmroot
+
+      static constexpr uint32_t range = 2 << 13;
+      if ( block->block_num % range == 0 ){
+         fc_dlog(logger,"new mkl");
+         blockroot_merkle_type par;
+         par.block_num = block->block_num;
+         par.merkle = block->blockroot_merkle;
+         chain_contract->blockmerkle( par );
+      }
    }
 
    void ibc_plugin_impl::accepted_confirmation(const header_confirmation& head) {
@@ -2341,12 +2395,28 @@ namespace eosio { namespace ibc {
             local_sections.erase( it );
             local_sections.insert( sctn );
          }
+
+         // erase old local sections
+         auto lwcls_opt = chain_contract->get_sections_tb_reverse_nth_section();
+         if ( lwcls_opt.valid()){
+            section_type lwcls = *lwcls_opt;
+            int sum = 0;
+            for ( auto it = local_sections.rbegin(); it != local_sections.rend(); ++it ){
+               if ( it->first < lwcls.first ){
+                  ++sum;
+               }
+               if ( sum >= MaxLocalOldSectionsCache ){
+                  local_sections.erase( local_sections.iterator_to(*it) );
+               }
+            }
+         }
       }
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_request_message &msg ) {
       peer_ilog(c, "received ibc_trxs_request_message, table ${tb}, id range [${f},${t}]",("tb",msg.table)("f",msg.range.first)("t",msg.range.second));
 
+      uint32_t safe_tslot = my_impl->get_safe_head_tslot();
       ibc_trxs_data_message ret_msg;
       ret_msg.table = msg.table;
 
@@ -2355,6 +2425,7 @@ namespace eosio { namespace ibc {
             auto p = token_contract->get_table_origtrxs_trx_info_by_id( id );
             if ( p.valid() ){
                original_trx_info trx_info = *p;
+               if ( trx_info.block_time_slot >= safe_tslot ){ break; }
                auto info_opt = get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.id );
                if ( info_opt.valid() ){
                   ret_msg.trxs_rich_info.push_back( *info_opt );
@@ -2369,6 +2440,7 @@ namespace eosio { namespace ibc {
             auto p = token_contract->get_table_cashtrxs_trx_info_by_seq_num( id );
             if ( p.valid() ){
                cash_trx_info trx_info = *p;
+               if ( trx_info.block_time_slot >= safe_tslot ){ break; }
                auto info_opt = get_ibc_trx_rich_info( trx_info.block_time_slot, trx_info.trx_id, trx_info.seq_num );
                if ( info_opt.valid() ){
                   ret_msg.trxs_rich_info.push_back( *info_opt );
@@ -2393,19 +2465,66 @@ namespace eosio { namespace ibc {
 
       if ( msg.table == N(origtrxs) ) {
          for( const auto& trx_info : msg.trxs_rich_info ){
-            if ( local_origtrxs.find( trx_info.table_id ) == local_origtrxs.end() ) {
+            if ( local_origtrxs.size() == 0 ){
                local_origtrxs.insert(trx_info);
+               break;
             }
+
+            auto it =  local_origtrxs.find( trx_info.table_id );
+            if ( it == local_origtrxs.end() ) { // link
+               if ( trx_info.table_id == local_origtrxs.rbegin()->table_id + 1 ){
+                  local_origtrxs.insert(trx_info);
+               } else {
+                  peer_elog(c,"received unlinkable trxs_rich_info table: origtrxs, table_id: ${tb_id}, trx_id: ${trx_id}",("tb_id",trx_info.table_id)("trx_id",trx_info.trx_id));
+               }
+            } else {
+               if ( it->trx_id == trx_info.trx_id ){
+                  break;
+               } else { // replace
+                  local_origtrxs.erase( it );
+                  local_origtrxs.insert(trx_info);
+                  peer_elog(c,"received conflict trxs_rich_info table: origtrxs, table_id: ${tb_id}",("tb_id",trx_info.table_id));
+               }
+            }
+         }
+
+         while ( local_origtrxs.size() != 0 &&
+              local_origtrxs.rbegin()->table_id - local_origtrxs.begin()->table_id > MaxLocalOrigtrxsCache ){
+            local_origtrxs.erase( local_origtrxs.begin() );
          }
          return;
       }
 
       if ( msg.table == N(cashtrxs) ){
          for( const auto& trx_info : msg.trxs_rich_info ){
-            if ( local_cashtrxs.find( trx_info.table_id ) == local_cashtrxs.end() ) {
+            if ( local_cashtrxs.size() == 0 ){
                local_cashtrxs.insert(trx_info);
+               break;
+            }
+
+            auto it =  local_cashtrxs.find( trx_info.table_id );
+            if ( it == local_cashtrxs.end() ) { // link
+               if ( trx_info.table_id == local_cashtrxs.rbegin()->table_id + 1 ){
+                  local_cashtrxs.insert(trx_info);
+               } else {
+                  peer_elog(c,"received unlinkable trxs_rich_info table: cashtrxs, table_id: ${tb_id}, trx_id: ${trx_id}",("tb_id",trx_info.table_id)("trx_id",trx_info.trx_id));
+               }
+            } else {
+               if ( it->trx_id == trx_info.trx_id ){
+                  break;
+               } else { // replace
+                  local_cashtrxs.erase( it );
+                  local_cashtrxs.insert(trx_info);
+                  peer_elog(c,"received conflict trxs_rich_info table: cashtrxs, table_id: ${tb_id}",("tb_id",trx_info.table_id));
+               }
             }
          }
+
+         while ( local_cashtrxs.size() != 0 &&
+                 local_cashtrxs.rbegin()->table_id - local_cashtrxs.begin()->table_id > MaxLocalCashtrxsCache ){
+            local_cashtrxs.erase( local_cashtrxs.begin() );
+         }
+         return;
       }
    }
 
@@ -2414,6 +2533,13 @@ namespace eosio { namespace ibc {
          return blockroot_merkle_cache[ block_num - blockroot_merkle_cache.begin()->block_num  ].merkle;
       }
       return incremental_merkle();
+   }
+
+   uint32_t ibc_plugin_impl::get_safe_head_tslot(){
+      auto fdb_hbn = chain_plug->chain().fork_db_head_block_num();
+      auto sbp = chain_plug->chain().fetch_block_by_number( fdb_hbn );
+      auto head_tslot = sbp->timestamp.slot;
+      return head_tslot - MinDepth;
    }
 
    lwc_section_type ibc_plugin_impl::get_lwcls_info() {
