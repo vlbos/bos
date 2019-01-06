@@ -2875,7 +2875,7 @@ namespace eosio { namespace ibc {
          msg.end_block_num = min_last_num + 1;
          for( auto &c : connections) {
             if( c->current() ) {
-               peer_ilog(c, "send lwc_section_request_message [${from},${to})",("from",msg.start_block_num)("to",msg.end_block_num));
+               peer_ilog(c, "send lwc_section_request_message [${from},${to}]",("from",msg.start_block_num)("to",msg.end_block_num));
                c->enqueue( msg );
             }
          }
@@ -2980,7 +2980,7 @@ namespace eosio { namespace ibc {
          auto it_orig = local_origtrxs.project<0>(__it_orig);
          if (  it_orig != local_origtrxs.end() ){
             start_blk_num = it_orig->block_num;
-            ilog("origtrxs has new trxs, start block ${n}",("n",start_blk_num));
+            //ilog("origtrxs has new trxs, start block ${n}",("n",start_blk_num));
          }
 
          // --- check local_cashtrxs ---
@@ -2992,7 +2992,7 @@ namespace eosio { namespace ibc {
             } else {
                start_blk_num = it_cash->block_num;
             }
-            ilog("cashtrxs has new trxs, start block ${n}",("n",start_blk_num));
+            //ilog("cashtrxs has new trxs, start block ${n}",("n",start_blk_num));
          }
 
          // --- check new_prod_blk_nums ---
@@ -3022,10 +3022,10 @@ namespace eosio { namespace ibc {
             if ( ! found ){
                lwc_section_request_message msg;
                msg.start_block_num = start_blk_num;
-               msg.end_block_num = start_blk_num + chain_contract->lwc_lib_depth;
+               msg.end_block_num = start_blk_num + chain_contract->lwc_lib_depth + 1;
                for( auto &c : connections) {
                   if( c->current() ) {
-                     peer_ilog(c, "send lwc_section_request_message [${from},${to})",("from",msg.start_block_num)("to",msg.end_block_num));
+                     peer_ilog(c, "send lwc_section_request_message [${from},${to}]",("from",msg.start_block_num)("to",msg.end_block_num));
                      c->enqueue( msg );
                   }
                }
