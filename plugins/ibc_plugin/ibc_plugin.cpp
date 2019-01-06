@@ -857,9 +857,9 @@ namespace eosio { namespace ibc {
       void cashconfirm( const cashconfirm_action_params& p );
 
       // tables
-      range_type                          get_table_origtrxs_id_range();
+      range_type                          get_table_origtrxs_id_range( bool raw = false );
       optional<original_trx_info>         get_table_origtrxs_trx_info_by_id( uint64_t id );
-      range_type                          get_table_cashtrxs_seq_num_range();
+      range_type                          get_table_cashtrxs_seq_num_range( bool raw = false );
       optional<cash_trx_info>             get_table_cashtrxs_trx_info_by_seq_num( uint64_t seq_num );
       optional<global_state_ibc_token>    get_global_state_singleton();
       optional<global_mutable_ibc_token>  get_global_mutable_singleton();
@@ -949,8 +949,11 @@ namespace eosio { namespace ibc {
       state = c_state;
    }
 
-   range_type ibc_token_contract::get_table_origtrxs_id_range() {
+   range_type ibc_token_contract::get_table_origtrxs_id_range( bool raw ) {
       auto range = get_table_primary_key_range( account, account, N(origtrxs) );
+      if ( raw ){
+         return range;
+      }
       uint32_t safe_tslot = my_impl->get_safe_head_tslot();
 
       chain_apis::read_only::get_table_rows_params par;
@@ -998,8 +1001,11 @@ namespace eosio { namespace ibc {
       return optional<original_trx_info>();
    }
 
-   range_type ibc_token_contract::get_table_cashtrxs_seq_num_range() {
+   range_type ibc_token_contract::get_table_cashtrxs_seq_num_range( bool raw ) {
       auto range = get_table_primary_key_range( account, account, N(cashtrxs) );
+      if ( raw ){
+         return range;
+      }
       uint32_t safe_tslot = my_impl->get_safe_head_tslot();
 
       chain_apis::read_only::get_table_rows_params par;
@@ -2888,7 +2894,7 @@ namespace eosio { namespace ibc {
 
          // --- local_origtrxs ---
          ilog("local_origtrxs -- ");
-         auto range = token_contract->get_table_cashtrxs_seq_num_range();
+         auto range = token_contract->get_table_cashtrxs_seq_num_range(true);
          if ( range.first == 0 ){
             for( const auto& t : local_origtrxs.get<by_id>( ) ) {
                if ( lwcls.first <= t.block_num && t.block_num <= lib_num ){
