@@ -2809,22 +2809,8 @@ namespace eosio { namespace ibc {
       return trx_info;
    }
 
-
    /**
-    * 本函数实现了整个跨链信息交互逻辑内核
-    * 轻客户端的sction是核心处理单元
-    *
-    * 首先根据 local_origtrxs local_cashtrxs new_prod_blk_nums 计算当前section的最小范围。
-    * 判断当前合约中的section是否达到了最小范围。
-    *   如果没有达到则发送section请求信息。
-    * 如果已经有进lib的区块，则开始发送local_origtrxs 和local_cashtrxs 中可以发送的交易。
-    * 判断此section最小范围内的cashtrxs已全部发送完成
-    * 判断此section最小范围内的origtrxs已全部发送完成或尝试了足够的次数。
-    *
-    * 如果都发送完成或尝试足够次数，给seciton标记，已完结
-    *
-    * 有新的trx，则申请新的section。
-    *
+    * This function implements the core ibc logic of the plugin
     */
 
    void ibc_plugin_impl::ibc_core_checker( ){
@@ -2834,10 +2820,8 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      ///< step one: let lwcls reach its minimum length
-      ilog("--- step one ---");
+      ///< ---- step one: let lwcls in ibc.chain reach its minimum length ---- >///
 
-      // get lwcls
       auto opt_sctn = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !opt_sctn.valid() ){
          elog("internal error, can not get lwcls");
@@ -2845,7 +2829,7 @@ namespace eosio { namespace ibc {
       }
       section_type lwcls = *opt_sctn;
 
-      // calculation the minimun range of lwcls should reach through information of local_origtrxs local_cashtrxs and new_prod_blk_nums
+      // calculation the minimun range of lwcls should reach through information of local_origtrxs, local_cashtrxs and new_prod_blk_nums
       uint32_t min_last_num = lwcls.first + chain_contract->lwc_lib_depth ;
       if ( !(lwcls.np_num == 0 || lwcls.np_num > chain_plug->chain().head_block_num()) ){
          min_last_num = lwcls.np_num + 325 + chain_contract->lwc_lib_depth;
@@ -2872,7 +2856,9 @@ namespace eosio { namespace ibc {
       }
 
       // check if lwcls reached the minimum range, if not, send lwc_section_request_message
+      bool reached_min_length = true;
       if ( lwcls.last < min_last_num ){
+         reached_min_length = false;
          lwc_section_request_message msg;
          msg.start_block_num = lwcls.last + 1;
          msg.end_block_num = min_last_num + 1;
@@ -2884,18 +2870,17 @@ namespace eosio { namespace ibc {
          }
       }
 
-      ///< step two: push all transactions which should validate within this lwcls first to lib block
-      ilog("--- step two ---");
+
+      ///< ---- step two: push all transactions which should validate within this lwcls first to lib block ---- >///
+
       std::vector<ibc_trx_rich_info> orig_trxs_to_push;
       std::vector<ibc_trx_rich_info> cash_trxs_to_push;
-
       if ( lwcls.valid ){
          uint32_t lib_num =  std::max( lwcls.first, lwcls.last > chain_contract->lwc_lib_depth ? lwcls.last - chain_contract->lwc_lib_depth : 1 );
 
          // --- local_origtrxs ---
-         ilog("local_origtrxs -- ");
          auto range = token_contract->get_table_cashtrxs_seq_num_range(true);
-         if ( range.first == 0 ){
+         if ( range.first == 0 ){   // range.first == 0 means cashtrxs is empty, range.second shoule alse be 0
             for( const auto& t : local_origtrxs.get<by_id>( ) ) {
                if ( lwcls.first <= t.block_num && t.block_num <= lib_num ){
                   orig_trxs_to_push.push_back( t );
@@ -2907,59 +2892,55 @@ namespace eosio { namespace ibc {
                auto orig_trx_id = cash_opt->orig_trx_id;
                auto it_trx_id = local_origtrxs.get<by_trx_id>().find( orig_trx_id );
                auto it = local_origtrxs.project<0>(it_trx_id);
-               ++it;
-               while ( it != local_origtrxs.end() && it->block_num <= lib_num ){
-                  orig_trxs_to_push.push_back( *it );
+               if ( it != local_origtrxs.end() ){
                   ++it;
+                  while ( it != local_origtrxs.end() && it->block_num <= lib_num ){
+                     orig_trxs_to_push.push_back( *it );
+                     ++it;
+                  }
                }
-            } else {
-               ilog("internal error, failed to get cash transaction infomation of seq_num ${n}",("n",range.second));
-            }
+               else { elog("internal error, can not find original transacton infomation form local_origtrxs"); }
+            } else { ilog("internal error, failed to get cash transaction infomation of seq_num ${n}",("n",range.second)); }
          }
+
          if ( ! orig_trxs_to_push.empty() ){
-            token_contract->push_cash_trxs( orig_trxs_to_push, range.second + 1 );
+            token_contract->push_cash_trxs( orig_trxs_to_push, range.second + 1 );  // todo: increase robustness, retry when failed.
          }
 
          // --- local_cashtrxs ---
-         ilog("local_cashtrxs -- ");
          auto gm_opt = token_contract->get_global_mutable_singleton();
          if ( !gm_opt.valid() ){
             elog("internal error, failed to get global_mutable_singleton");
             return;
          }
          uint32_t last_cash_seq_num = gm_opt->cash_seq_num;
-
-         ilog("last_cash_seq_num + 1 ${n}",("n",last_cash_seq_num + 1));
-         auto it = local_cashtrxs.get<by_id>().find(last_cash_seq_num + 1);
-         ilog("it->block_num ${n1}<= lib_num${n2} ",("n1",it->block_num)("n2",lib_num));
+         auto it = local_cashtrxs.get<by_id>().find( last_cash_seq_num + 1 );
          while ( it != local_cashtrxs.end() && it->block_num <= lib_num ){
-            ilog("&*&*&");
             cash_trxs_to_push.push_back( *it );
             ++it;
          }
 
          if ( !cash_trxs_to_push.empty() ){
-            ilog("!cash_trxs_to_push.empty() ${n}",("n",last_cash_seq_num + 1));
             token_contract->push_cashconfirm_trxs( cash_trxs_to_push, last_cash_seq_num + 1 );
          }
-      ilog("~1~~~");
       }
 
-      ///< step three: check if all related trxs with lwcls in local_origtrxs and local_cashtrxs handled
-      ilog("--- step three ---");
-      bool all_b = false, orig_b = false, cash_b = false;
-      // --- check local_origtrxs ---
 
+      ///< ---- step three: check if all related trxs about lwcls in local_origtrxs and local_cashtrxs have handled ---- >///
+
+      bool all_b = false, orig_b = false, cash_b = false;
+
+      // --- check local_origtrxs ---
       if ( orig_trxs_to_push.empty() || orig_trxs_to_push.back().trx_id == token_contract->last_origtrx_pushed ){
          orig_b = true;
       }
 
+      // --- check local_cashtrxs ---
       auto gm_opt = token_contract->get_global_mutable_singleton();
       if ( !gm_opt.valid() ){
          elog("internal error, failed to get global_mutable_singleton");
          return;
       }
-
       if ( cash_trxs_to_push.empty() ){
          cash_b = true;
       } else {
@@ -2973,25 +2954,29 @@ namespace eosio { namespace ibc {
          }
       }
 
-      if ( orig_b && cash_b ){
-         ilog("all related trxs in local_origtrxs and local_cashtrxs had handled");
+      // --- summary ---
+      if ( orig_b && cash_b && reached_min_length ){
+         ilog("no trxs in local_origtrxs and local_cashtrxs need to deal with in current lwcls");
          all_b = true;
       } else {
          ilog("some trxs didn't handle yet");
          return;
       }
 
-      ///< step four: if has new trxs, request the next section range
-      ilog("--- step four ---");
+
+      ///< ---- step four: if has new trxs, request the next section ---- >///
       {
          uint32_t start_blk_num = 0;
+
+         // --- check local_origtrxs ---
          auto __it_orig = local_origtrxs.get<by_block_num>().lower_bound( lwcls.last + 1 );
          auto it_orig = local_origtrxs.project<0>(__it_orig);
          if (  it_orig != local_origtrxs.end() ){
             start_blk_num = it_orig->block_num;
-            ilog("yes origtrxs has new trxs,${n}",("n",start_blk_num));
+            ilog("origtrxs has new trxs, start block ${n}",("n",start_blk_num));
          }
 
+         // --- check local_cashtrxs ---
          auto __it_cash = local_cashtrxs.get<by_block_num>().lower_bound( lwcls.last + 1 );
          auto it_cash = local_cashtrxs.project<0>(__it_cash);
          if (  it_cash != local_cashtrxs.end() ){
@@ -3000,9 +2985,10 @@ namespace eosio { namespace ibc {
             } else {
                start_blk_num = it_cash->block_num;
             }
-            ilog("yes cashtrxs has new trxs,${n}",("n",start_blk_num));
+            ilog("cashtrxs has new trxs, start block ${n}",("n",start_blk_num));
          }
 
+         // --- check new_prod_blk_nums ---
          for ( const auto& num : new_prod_blk_nums ){
             if ( lwcls.last <= num && num <= start_blk_num ){
                if ( start_blk_num != 0 ){
@@ -3013,26 +2999,23 @@ namespace eosio { namespace ibc {
             }
          }
 
+         // --- summary ----
          if ( start_blk_num != 0 ){
-            // check if has relate section in local store.
-
-            ilog("===1===");
+            // check if has relate section in local store
             bool found = false;
             for( auto it = local_sections.rbegin(); it != local_sections.rend(); ++it ){
-               ilog("===111===");
                if ( it->first <= start_blk_num && start_blk_num <= it->last ){
                   found = true;
                   chain_contract->pushsection( it->section_data );
                   break;
                }
             }
-            ilog("===2===");
-            if ( ! found ){
 
+            // not fount, sent lwc_section_request_message
+            if ( ! found ){
                lwc_section_request_message msg;
                msg.start_block_num = start_blk_num;
                msg.end_block_num = start_blk_num + chain_contract->lwc_lib_depth;
-
                for( auto &c : connections) {
                   if( c->current() ) {
                      peer_ilog(c, "send lwc_section_request_message [${from},${to})",("from",msg.start_block_num)("to",msg.end_block_num));
@@ -3041,7 +3024,6 @@ namespace eosio { namespace ibc {
                }
             }
          }
-         ilog("===3===");
       }
    }
 
