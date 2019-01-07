@@ -1,6 +1,6 @@
 cmake_minimum_required( VERSION 3.5 )
 
-project( vonhenry-EOSIO )
+project( EOSIO )
 
 enable_testing()
 
