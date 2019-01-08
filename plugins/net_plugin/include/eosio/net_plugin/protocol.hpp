@@ -139,7 +139,7 @@ namespace eosio {
                                       notice_message,
                                       request_message,
                                       sync_request_message,
-                                      signed_block, // which = 7
+                                      signed_block,
                                       packed_transaction>;
 
 } // namespace eosio
