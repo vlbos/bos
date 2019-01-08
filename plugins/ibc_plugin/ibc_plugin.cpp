@@ -239,6 +239,8 @@ namespace eosio { namespace ibc {
       void new_prod_blk_num_insert( uint32_t num );
       optional<ibc_trx_rich_info> get_ibc_trx_rich_info( uint32_t block_time_slot, transaction_id_type trx_id, uint64_t table_id );
 
+      void check_if_remove_old_data_in_ibc_contracts();
+
       void ibc_core_checker( );
       void start_ibc_core_timer( );
 
@@ -680,9 +682,11 @@ namespace eosio { namespace ibc {
       void chain_init( const lwc_init_message& msg );
       void pushsection( const lwc_section_data_message& msg );
       void blockmerkle( const blockroot_merkle_type& data );
+      void rmfirstsctn();
 
       // tables
       optional<section_type>              get_sections_tb_reverse_nth_section( uint64_t nth = 0 ) const;
+      uint32_t                            get_sections_tb_size() const;
       optional<block_header_state_type>   get_chaindb_tb_bhs_by_block_num( uint64_t num ) const;
       block_id_type                       get_chaindb_tb_block_id_by_block_num( uint64_t num ) const;
       optional<global_state_ibc_chain>    get_global_singleton() const;
@@ -743,6 +747,26 @@ namespace eosio { namespace ibc {
          return result;
       }
       return optional<section_type>();
+   }
+
+   uint32_t ibc_chain_contract::get_sections_tb_size() const {
+      chain_apis::read_only::get_table_rows_params par;
+      par.json = true;  // must be true
+      par.code = account;
+      par.scope = account.to_string();
+      par.table = N(sections);
+      par.table_key = "primary_key";
+      par.lower_bound = to_string(0);
+      par.upper_bound = "";
+      par.limit = 10;
+      par.key_type = "i64";
+      par.index_position = "1";
+
+      try {
+         auto result = my_impl->chain_plug->get_read_only_api().get_table_rows( par );
+         return result.rows.size();
+      } FC_LOG_AND_DROP()
+      return 0;
    }
 
    optional<block_header_state_type> ibc_chain_contract::get_chaindb_tb_bhs_by_block_num( uint64_t num ) const {
@@ -845,6 +869,16 @@ namespace eosio { namespace ibc {
       push_action( *actn );
    }
 
+   void ibc_chain_contract::rmfirstsctn(){
+      auto actn = get_action( account, N(blockmerkle), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+         ("relay",             my_impl->relay));
+
+      if ( ! actn.valid() ){
+         elog("newsection: get action failed");
+         return;
+      }
+      push_action( *actn );
+   }
 
    // --------------- ibc_token_contract ---------------
    class ibc_token_contract {
@@ -855,6 +889,7 @@ namespace eosio { namespace ibc {
       // actions
       void cash( const cash_action_params& p );
       void cashconfirm( const cashconfirm_action_params& p );
+      void chkrollback( uint32_t amount );
 
       // tables
       range_type                          get_table_origtrxs_id_range( bool raw = false );
@@ -1331,6 +1366,17 @@ namespace eosio { namespace ibc {
       push_action( *actn );
    }
 
+   void ibc_token_contract::chkrollback( uint32_t amount ){
+      auto actn = get_action( account, N(chkrollback), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+         ("amount",         amount)
+         ("relay",          my_impl->relay));
+
+      if ( ! actn.valid() ){
+         elog("newsection: get action failed");
+         return;
+      }
+      push_action( *actn );
+   }
 
    // --------------- connection ---------------
    connection::connection(string endpoint)
@@ -2820,6 +2866,51 @@ namespace eosio { namespace ibc {
       return trx_info;
    }
 
+   void ibc_plugin_impl::check_if_remove_old_data_in_ibc_contracts(){
+
+      // ---- ibc.token ----
+      uint32_t last_finished_trx_block_time_slot = 0;
+      auto gm_opt = token_contract->get_global_mutable_singleton();
+      if ( gm_opt.valid() ){
+         last_finished_trx_block_time_slot = gm_opt->last_finished_trx_block_time_slot;
+      } else {
+         elog("get_global_mutable_singleton failed");
+         return;
+      }
+
+      if ( last_finished_trx_block_time_slot == 0 ){
+         return;
+      }
+
+      uint32_t count = 0;
+      range_type range = token_contract->get_table_origtrxs_id_range();
+      if ( range == range_type() ){
+         return;
+      }
+
+      for ( uint64_t i = range.first; i < range.second ; ++i ){
+         auto trx_opt = token_contract->get_table_origtrxs_trx_info_by_id( i );
+         if ( trx_opt.valid() ){
+            if ( trx_opt->block_time_slot + 2 < last_finished_trx_block_time_slot ){
+               count++;
+            }
+         }
+         if ( count >= 60 ){
+            break;
+         }
+      }
+
+      if ( count > 0 ){
+         token_contract->chkrollback(60);
+      }
+
+      // ---- ibc.chain ----
+      uint32_t size = chain_contract->get_sections_tb_size();
+      if ( size >=3  ){
+         chain_contract->rmfirstsctn();
+      }
+   }
+
    /**
     * This function implements the core ibc logic of the plugin
     */
@@ -3036,6 +3127,7 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::start_ibc_core_timer( ){
       ibc_core_checker();
+      check_if_remove_old_data_in_ibc_contracts();
 
       ibc_core_timer->expires_from_now( ibc_core_interval );
       ibc_core_timer->async_wait( [this](boost::system::error_code ec) {
