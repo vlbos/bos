@@ -2921,6 +2921,8 @@ namespace eosio { namespace ibc {
          return;
       }
 
+      check_if_remove_old_data_in_ibc_contracts();
+
       ///< ---- step one: let lwcls in ibc.chain reach its minimum length ---- >///
 
       auto opt_sctn = chain_contract->get_sections_tb_reverse_nth_section();
@@ -3126,7 +3128,6 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::start_ibc_core_timer( ){
       ibc_core_checker();
-      check_if_remove_old_data_in_ibc_contracts();
 
       ibc_core_timer->expires_from_now( ibc_core_interval );
       ibc_core_timer->async_wait( [this](boost::system::error_code ec) {
