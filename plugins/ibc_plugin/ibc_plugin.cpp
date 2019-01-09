@@ -2976,8 +2976,8 @@ namespace eosio { namespace ibc {
 
       ///< ---- step two: push all transactions which should validate within this lwcls first to lib block ---- >///
 
-      static const max_push_orig_trxs_per_time = 30;
-      static const max_push_cash_trxs_per_time = 50;
+      static const uint32_t max_push_orig_trxs_per_time = 30;
+      static const uint32_t max_push_cash_trxs_per_time = 50;
 
       std::vector<ibc_trx_rich_info> orig_trxs_to_push;
       std::vector<ibc_trx_rich_info> cash_trxs_to_push;
@@ -3039,7 +3039,7 @@ namespace eosio { namespace ibc {
             } else {
                to_push = cash_trxs_to_push;
             }
-            token_contract->push_cashconfirm_trxs( cash_trxs_to_push, last_cash_seq_num + 1 );
+            token_contract->push_cashconfirm_trxs( to_push, last_cash_seq_num + 1 );
          }
       }
 
