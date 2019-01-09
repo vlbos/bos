@@ -2214,11 +2214,9 @@ namespace eosio { namespace ibc {
          request.table = N(cashtrxs);
          if (local_cashtrxs.size() == 0) {
             request.range = msg.cashtrxs_table_seq_num_range;
-            send_all( request );
          } else if (local_cashtrxs.rbegin()->table_id < msg.cashtrxs_table_seq_num_range.second) {
             request.range.first = local_cashtrxs.rbegin()->table_id + 1;
             request.range.second = msg.cashtrxs_table_seq_num_range.second;
-            send_all( request );
          }
          if ( request.range != range_type() ) {
             for( auto &c : connections) {
@@ -2868,6 +2866,12 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::check_if_remove_old_data_in_ibc_contracts(){
 
+      // ---- ibc.chain ----
+      uint32_t size = chain_contract->get_sections_tb_size();
+      if ( size >=3  ){
+         chain_contract->rmfirstsctn();
+      }
+
       // ---- ibc.token ----
       uint32_t last_finished_trx_block_time_slot = 0;
       auto gm_opt = token_contract->get_global_mutable_singleton();
@@ -2904,11 +2908,6 @@ namespace eosio { namespace ibc {
          token_contract->chkrollback(60);
       }
 
-      // ---- ibc.chain ----
-      uint32_t size = chain_contract->get_sections_tb_size();
-      if ( size >=3  ){
-         chain_contract->rmfirstsctn();
-      }
    }
 
    /**
