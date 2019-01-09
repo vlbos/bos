@@ -2256,11 +2256,11 @@ namespace eosio { namespace ibc {
          return;
       }
       if ( rq_length >= MaxSectionLength && safe_blk_num - msg.start_block_num < MaxSectionLength ){
-         ilog("have not enough data");
+         // ilog("have not enough data");
          return;
       }
       if  ( rq_length < MaxSectionLength && msg.end_block_num > safe_blk_num ) {
-         ilog("have not enough data");
+         // ilog("have not enough data");
          return;
       }
 
