@@ -1163,7 +1163,7 @@ namespace eosio { namespace ibc {
             elog("push cash transaction failed, index ${i}",("i",index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            ilog("pushed cash transaction: ${id}", ( "id", trx_id ));
+            ilog("pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
             next_seq_num += 1;
          }
 
@@ -1253,7 +1253,7 @@ namespace eosio { namespace ibc {
             return;
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            ilog("pushed cashconfirm transaction: ${id}", ( "id", trx_id ));
+            ilog("pushed cashconfirm transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
          }
 
          int next_index = index + 1;
