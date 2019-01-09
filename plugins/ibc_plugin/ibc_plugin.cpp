@@ -2976,6 +2976,9 @@ namespace eosio { namespace ibc {
 
       ///< ---- step two: push all transactions which should validate within this lwcls first to lib block ---- >///
 
+      static const max_push_orig_trxs_per_time = 30;
+      static const max_push_cash_trxs_per_time = 50;
+
       std::vector<ibc_trx_rich_info> orig_trxs_to_push;
       std::vector<ibc_trx_rich_info> cash_trxs_to_push;
       if ( lwcls.valid ){
@@ -3007,7 +3010,13 @@ namespace eosio { namespace ibc {
          }
 
          if ( ! orig_trxs_to_push.empty() ){
-            token_contract->push_cash_trxs( orig_trxs_to_push, range.second + 1 );  // todo: increase robustness, retry when failed.
+            std::vector<ibc_trx_rich_info> to_push;
+            if ( orig_trxs_to_push.size() > max_push_orig_trxs_per_time ){
+               to_push = std::vector<ibc_trx_rich_info>( orig_trxs_to_push.begin(), orig_trxs_to_push.begin() + max_push_orig_trxs_per_time );
+            } else {
+               to_push = orig_trxs_to_push;
+            }
+            token_contract->push_cash_trxs( to_push, range.second + 1 );  // todo: increase robustness, retry when failed.
          }
 
          // --- local_cashtrxs ---
@@ -3024,6 +3033,12 @@ namespace eosio { namespace ibc {
          }
 
          if ( !cash_trxs_to_push.empty() ){
+            std::vector<ibc_trx_rich_info> to_push;
+            if ( cash_trxs_to_push.size() > max_push_cash_trxs_per_time ){
+               to_push = std::vector<ibc_trx_rich_info>( cash_trxs_to_push.begin(), cash_trxs_to_push.begin() + max_push_cash_trxs_per_time );
+            } else {
+               to_push = cash_trxs_to_push;
+            }
             token_contract->push_cashconfirm_trxs( cash_trxs_to_push, last_cash_seq_num + 1 );
          }
       }
