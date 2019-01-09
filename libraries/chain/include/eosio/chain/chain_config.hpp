@@ -102,6 +102,7 @@ struct chain_config {
    };
 
    friend inline bool operator !=( const chain_config& lhs, const chain_config& rhs ) { return !(lhs == rhs); }
+};
 
 // *bos*
 struct chain_config2 {
@@ -114,12 +115,14 @@ struct chain_config2 {
 
    void validate()const;
 };
+
 // *bos*
 struct guaranteed_minimum_resources {
    uint64_t ram_byte;
    uint64_t cpu_us;
    uint64_t net_byte;
 };
+
 } } // namespace eosio::chain
 
 FC_REFLECT(eosio::chain::chain_config,
