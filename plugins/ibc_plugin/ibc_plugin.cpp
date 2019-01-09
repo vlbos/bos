@@ -870,7 +870,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_chain_contract::rmfirstsctn(){
-      auto actn = get_action( account, N(blockmerkle), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+      auto actn = get_action( account, N(rmfirstsctn), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
          ("relay",             my_impl->relay));
 
       if ( ! actn.valid() ){
