@@ -889,7 +889,8 @@ namespace eosio { namespace ibc {
       // actions
       void cash( const cash_action_params& p );
       void cashconfirm( const cashconfirm_action_params& p );
-      void chkrollback( uint32_t amount );
+      void rollback( const uint64_t table_id );
+      void rmunablerb( const transaction_id_type trx_id );
 
       // tables
       range_type                          get_table_origtrxs_id_range( bool raw = false );
@@ -1366,9 +1367,21 @@ namespace eosio { namespace ibc {
       push_action( *actn );
    }
 
-   void ibc_token_contract::chkrollback( uint32_t amount ){
-      auto actn = get_action( account, N(chkrollback), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
-         ("amount",         amount)
+   void ibc_token_contract::rollback( const uint64_t table_id ){
+      auto actn = get_action( account, N(rollback), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+         ("table_id",       table_id)
+         ("relay",          my_impl->relay));
+
+      if ( ! actn.valid() ){
+         elog("newsection: get action failed");
+         return;
+      }
+      push_action( *actn );
+   }
+
+   void ibc_token_contract::rmunablerb( const transaction_id_type trx_id ){
+      auto actn = get_action( account, N(rmunablerb), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+         ("trx_id",         trx_id)
          ("relay",          my_impl->relay));
 
       if ( ! actn.valid() ){
@@ -2895,19 +2908,18 @@ namespace eosio { namespace ibc {
       for ( uint64_t i = range.first; i < range.second ; ++i ){
          auto trx_opt = token_contract->get_table_origtrxs_trx_info_by_id( i );
          if ( trx_opt.valid() ){
+            if ( trx_opt->block_time_slot + 105 < last_finished_trx_block_time_slot ){
+               token_contract->rmunablerb( trx_opt->trx_id );
+               continue;
+            }
+
             if ( trx_opt->block_time_slot + 2 < last_finished_trx_block_time_slot ){
-               count++;
+               token_contract->rollback( trx_opt->id );
+            } else {
+               break;
             }
          }
-         if ( count >= 60 ){
-            break;
-         }
       }
-
-      if ( count > 0 ){
-         token_contract->chkrollback(60);
-      }
-
    }
 
    /**
@@ -3016,6 +3028,7 @@ namespace eosio { namespace ibc {
             } else {
                to_push = orig_trxs_to_push;
             }
+            ilog("---------orig_trxs_to_push to push size ${n}",("n",to_push.size()));
             token_contract->push_cash_trxs( to_push, range.second + 1 );  // todo: increase robustness, retry when failed.
          }
 
@@ -3039,6 +3052,7 @@ namespace eosio { namespace ibc {
             } else {
                to_push = cash_trxs_to_push;
             }
+            ilog("---------cash_trxs_to_push to push size ${n}",("n",to_push.size()));
             token_contract->push_cashconfirm_trxs( to_push, last_cash_seq_num + 1 );
          }
       }
