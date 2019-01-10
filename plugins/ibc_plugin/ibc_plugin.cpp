@@ -3079,8 +3079,11 @@ namespace eosio { namespace ibc {
             } else {
                to_push = orig_trxs_to_push;
             }
-            ilog("---------orig_trxs_to_push to push size ${n}",("n",to_push.size()));
-            token_contract->push_cash_trxs( to_push, range.second + 1 );  // todo: increase robustness, retry when failed.
+
+            if ( to_push.back().trx_id != token_contract->last_origtrx_pushed ){
+               ilog("---------orig_trxs_to_push to push size ${n}",("n",to_push.size()));
+               token_contract->push_cash_trxs( to_push, range.second + 1 );  // todo: increase robustness, retry when failed.
+            }
          }
 
          // --- local_cashtrxs ---
