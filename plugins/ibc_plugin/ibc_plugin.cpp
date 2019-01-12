@@ -2395,8 +2395,6 @@ namespace eosio { namespace ibc {
       uint32_t msg_first_num = msg.headers.begin()->block_num();
       uint32_t msg_last_num = msg.headers.rbegin()->block_num();
 
-      idump((msg_first_num)(msg_last_num)(ls));
-
       if( msg_last_num <= ls.last && msg.headers.rbegin()->id() == chain_contract->get_chaindb_tb_block_id_by_block_num(msg_last_num) ){
          ilog("lwc_section_data_message has no new data");
          return;
@@ -2661,7 +2659,7 @@ namespace eosio { namespace ibc {
       // check ibc.token contract
       if ( token_contract->state != working ){
          token_contract->get_contract_state();
-         ilog("ibc.token contract not in working state");
+         ilog("ibc.token contract not in working state, current state: ${s}", ("s", contract_state_str( token_contract->state )));
          return false;
       }
 
@@ -2765,20 +2763,27 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::start_ibc_heartbeat_timer() {
 
-      if ( should_send_ibc_heartbeat() ){
-         ibc_heartbeat_message msg;
-         chain_checker(msg);
-         ibc_chain_contract_checker(msg);
-         ibc_token_contract_checker(msg);
+      if ( count_open_sockets() != 0 ){
 
-         for( auto &c : connections) {
-            if( c->current() ) {
-               peer_ilog(c,"sending ibc_heartbeat_message");
-               //idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.lwcls));
-               c->enqueue( msg );
+         if ( should_send_ibc_heartbeat() ){
+            ibc_heartbeat_message msg;
+            chain_checker(msg);
+            ibc_chain_contract_checker(msg);
+            ibc_token_contract_checker(msg);
+
+            for( auto &c : connections) {
+               if( c->current() ) {
+                  peer_ilog(c,"sending ibc_heartbeat_message");
+                  //idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.lwcls));
+                  c->enqueue( msg );
+               }
             }
          }
+
+      } else {
+         elog("count_open_sockets() == 0");
       }
+
 
       ibc_heartbeat_timer->expires_from_now (ibc_heartbeat_interval);
       ibc_heartbeat_timer->async_wait ([this](boost::system::error_code ec) {
@@ -3212,7 +3217,11 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_ibc_core_timer( ){
-      ibc_core_checker();
+      if ( count_open_sockets() != 0 ){
+         ibc_core_checker();
+      } else {
+         elog("count_open_sockets() == 0");
+      }
 
       ibc_core_timer->expires_from_now( ibc_core_interval );
       ibc_core_timer->async_wait( [this](boost::system::error_code ec) {
