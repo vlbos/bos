@@ -984,6 +984,8 @@ namespace eosio { namespace ibc {
             if ( obj.ibc_contract != name() && obj.active ){
                c_state = working;
             }
+         } else {
+            dlog("get token contract global_state_singleton failed");
          }
       }
       state = c_state;
