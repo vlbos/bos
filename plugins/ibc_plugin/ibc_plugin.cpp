@@ -36,7 +36,7 @@ namespace fc {
 
 namespace eosio { namespace ibc {
 
-#define PLUGIN_TEST
+//#define PLUGIN_TEST
 
    static appbase::abstract_plugin& _ibc_plugin = app().register_plugin<ibc_plugin>();
 
@@ -1996,9 +1996,9 @@ namespace eosio { namespace ibc {
          blockroot_merkle_cache.erase( blockroot_merkle_cache.begin() );
       }
 
-      static constexpr uint32_t range = 2 << 13;
+      static constexpr uint32_t range = 2 << 10;
       if ( block->block_num % range == 0 ){
-         fc_dlog(logger,"new mkl");
+         ilog("push block ${n}'s block_merkle to chain contract",("n",block->block_num ));
          blockroot_merkle_type par;
          par.block_num = block->block_num;
          par.merkle = block->blockroot_merkle;
@@ -2353,6 +2353,10 @@ namespace eosio { namespace ibc {
                      start_point = brtm;
                   }
                }
+               if ( start_point.block_num == 0 ){
+                  elog( "didn't find block_state of number ${n} in contract records", ("n", check_num));
+               }
+
                if ( start_point.block_num != 0 && check_num - start_point.block_num <= 3600*24*2*BlocksPerSecond ){ // 2 days
                   while( start_point.block_num < check_num ){
                      start_point.merkle.append( chain_plug->chain().get_block_id_for_num( start_point.block_num ) );
