@@ -1986,7 +1986,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::irreversible_block(const block_state_ptr& block) {
-      /*fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id));*/
+      fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id));
       blockroot_merkle_type brtm;
       brtm.block_num = block->block_num;
       brtm.merkle = block->blockroot_merkle;
@@ -2179,7 +2179,7 @@ namespace eosio { namespace ibc {
          uint32_t depth = 200;
          block_state_ptr p;
          while ( p == block_state_ptr() && depth >= 25 ){
-            uint32_t check_num = std::max( head_num - depth, 1 );
+            uint32_t check_num = std::max( head_num - depth, uint32_t(1) );
             p = cc.fetch_block_state_by_number( check_num );
             if ( p == block_state_ptr() ){
                ilog("didn't get block_state_ptr of block num: ${n}", ("n", check_num ));
@@ -2989,6 +2989,20 @@ namespace eosio { namespace ibc {
     */
 
    void ibc_plugin_impl::ibc_core_checker( ){
+
+      // dump debug info
+      uint32_t orig_begin = 0, orig_end = 0, cash_begin = 0, cash_end = 0;
+      if( local_origtrxs.begin() != local_origtrxs.end() ){
+         orig_begin = local_origtrxs.begin()->table_id;
+         orig_end = local_origtrxs.rbegin()->table_id;
+      }
+      if( local_cashtrxs.begin() != local_cashtrxs.end() ){
+         cash_begin = local_cashtrxs.begin()->table_id;
+         cash_end = local_cashtrxs.rbegin()->table_id;
+      }
+      dlog("local_origtrxs id range [${of} - ${ot}], local_cashtrxs id range [${cf} - ${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
+
+
       if ( chain_contract->state != working || token_contract->state != working ){
          chain_contract->get_contract_state();
          token_contract->get_contract_state();
