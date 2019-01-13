@@ -2722,9 +2722,9 @@ namespace eosio { namespace ibc {
             }
          }
 
-         for( uint32_t blk_num = search_first->block_num() + 1; blk_num < search_last->block_num(); ++blk_num ){
+         for( uint32_t blk_num = search_first->block_num() + 1; blk_num <= search_last->block_num(); ++blk_num ){
             if (  get_block_ptr( blk_num )->schedule_version == check_begin->schedule_version + 1  ){
-               msg.new_producers_block_num = blk_num;
+               msg.new_producers_block_num = blk_num - 1;
                ilog("find new_producers_block_num ${n}", ("n", msg.new_producers_block_num));
                return;
             }
