@@ -2698,7 +2698,7 @@ namespace eosio {
 
    void net_plugin_impl::accepted_transaction(const transaction_metadata_ptr& md) {
       fc_dlog(logger,"signaled, id = ${id}",("id", md->id));
-//      dispatcher->bcast_transaction(md->packed_trx);
+      dispatcher->bcast_transaction(md->packed_trx);
    }
 
    void net_plugin_impl::applied_transaction(const transaction_trace_ptr& txn) {

@@ -58,7 +58,7 @@ namespace eosio { namespace ibc {
 
    // consts
    const static uint32_t MaxSendSectionLength = 30;
-   const static uint32_t MinDepth = 50;   // =12*4+2, never access blocks within this depth
+   const static uint32_t MinDepth = 20;   // =12*4+2, never access blocks within this depth
    const static uint32_t DiffOfTrxBeforeMinDepth = 10;
    const static uint32_t BPScheduleReplaceMinLength = 330;  // important para, 330 > 325, safer
    const static uint32_t BlocksPerSecond = 2;
@@ -3102,7 +3102,7 @@ namespace eosio { namespace ibc {
                wlog("can not find original transacton infomation form local_origtrxs, restart nodeos?");
                auto it_blk_num = local_origtrxs.get<by_block_num>().lower_bound( cash_opt->orig_trx_block_num + 1 );
                it = local_origtrxs.project<0>(it_blk_num);
-               while ( it != local_origtrxs.end() && it->block_num <= lib_num ){
+               while ( it != local_origtrxs.end() && lwcls.first <= it->block_num && it->block_num <= lib_num ){
                   orig_trxs_to_push.push_back( *it );
                   ++it;
                }
@@ -3132,7 +3132,7 @@ namespace eosio { namespace ibc {
       }
       uint32_t last_cash_seq_num = gm_opt->cash_seq_num;
       auto it = local_cashtrxs.get<by_id>().find( last_cash_seq_num + 1 );
-      while ( it != local_cashtrxs.end() && it->block_num <= lib_num ){
+      while ( it != local_cashtrxs.end() && lwcls.first <= it->block_num && it->block_num <= lib_num ){
          cash_trxs_to_push.push_back( *it );
          ++it;
       }
