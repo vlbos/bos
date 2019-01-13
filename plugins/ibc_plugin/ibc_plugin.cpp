@@ -3128,8 +3128,7 @@ namespace eosio { namespace ibc {
          if ( to_push.back().table_id != highest_idx ){
             highest_idx = to_push.back().table_id;
             times = 1;
-         }
-         if ( to_push.back().table_id == highest_idx ){
+         } else {
             times += 1;
          }
          if ( times <= 2 ){
