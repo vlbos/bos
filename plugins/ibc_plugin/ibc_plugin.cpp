@@ -2341,7 +2341,7 @@ namespace eosio { namespace ibc {
 
             // search form cache
             incremental_merkle mkl = get_brtm_from_cache( start_num );
-            if ( mkl._node_count != 0 ){
+            if ( mkl._node_count != 0 && mkl._active_nodes.size() > 0 ){
                ret_msg.blockroot_merkle = mkl;
                ret_msg.headers.push_back( *sbp );
             } else {
