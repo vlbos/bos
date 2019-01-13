@@ -2712,24 +2712,25 @@ namespace eosio { namespace ibc {
          search_last = check_end;
          search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
 
-         while( !(search_first->schedule_version == check_begin->schedule_version &&
-                  get_block_ptr( search_first->block_num() + 1 )->schedule_version == check_begin->schedule_version + 1 ) ){
-            if ( search_middle->schedule_version != check_begin->schedule_version  ){
+         while ( search_last->block_num() - search_first->block_num() >= 4 ){
+            if ( search_middle->schedule_version > search_first->schedule_version  ){
                search_last = search_middle;
                search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
             } else {
                search_first = search_middle;
                search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
             }
+         }
 
-            if ( search_last->block_num() - search_first->block_num() == 1 ){
-               elog("internal errror, can't find fit block num for the next schedule_version");
+         for( uint32_t blk_num = search_first->block_num() + 1; blk_num < search_last->block_num(); ++blk_num ){
+            if (  get_block_ptr( blk_num )->schedule_version == check_begin->schedule_version + 1  ){
+               msg.new_producers_block_num = blk_num;
+               ilog("find new_producers_block_num ${n}", ("n", msg.new_producers_block_num));
                return;
             }
-           ilog("---*---");
          }
-         msg.new_producers_block_num = search_first->block_num();
-         return;
+
+         elog("internal errror, can't find fit block num for the next schedule_version");
       }
       msg.new_producers_block_num = 0;
    }
