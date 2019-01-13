@@ -3121,7 +3121,7 @@ namespace eosio { namespace ibc {
          static uint64_t highest_idx = 0;
          static uint32_t times = 0;
 
-         if ( to_push.back().table_id > highest_idx ){
+         if ( to_push.back().table_id != highest_idx ){
             highest_idx = to_push.back().table_id;
             times = 1;
          }
