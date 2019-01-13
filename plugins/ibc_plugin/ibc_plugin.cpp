@@ -814,7 +814,7 @@ namespace eosio { namespace ibc {
 
    void ibc_chain_contract::get_blkrtmkls_tb() {
       const auto& d = app().get_plugin<chain_plugin>().chain().db();
-      const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(account, account, N(blkrtmkls)));
+      const auto* t_id = d.find<chain::table_id_object, chain::by_code_scope_table>(boost::make_tuple(account, my_impl->relay, N(blkrtmkls)));
       if (t_id != nullptr) {
          const auto &idx = d.get_index<chain::key_value_index, chain::by_scope_primary>();
          decltype(t_id->id) next_tid(t_id->id._id + 1);
@@ -1997,7 +1997,7 @@ namespace eosio { namespace ibc {
          blockroot_merkle_cache.erase( blockroot_merkle_cache.begin() );
       }
 
-      static constexpr uint32_t range = 2 << 10; // 2048
+      static constexpr uint32_t range = 1 << 10; // 1024
       if ( block->block_num % range == 0 ){
          ilog("push block ${n}'s block_merkle to chain contract",("n",block->block_num ));
          blockroot_merkle_type par;
