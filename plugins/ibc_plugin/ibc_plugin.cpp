@@ -3011,6 +3011,10 @@ namespace eosio { namespace ibc {
          return;
       }
 
+      ///< ---- step zero: remove side effect of unapplied trxs ---- >///
+      chain_plug->chain().abort_block();
+      chain_plug->chain().drop_all_unapplied_transactions();
+
       check_if_remove_old_data_in_ibc_contracts();
 
       ///< ---- step one: let lwcls in ibc.chain reach its minimum length ---- >///
