@@ -3212,13 +3212,8 @@ namespace eosio { namespace ibc {
             } else {
                start_blk_num = new_prod_blk_num;
             }
-            break;
          }
 
-
-         idump((new_prod_blk_num));
-
-ilog("-----startblk num-----${n}",("n",start_blk_num));
          // --- summary ----
          if ( start_blk_num != 0 ){
             // check if has relate section in local store
