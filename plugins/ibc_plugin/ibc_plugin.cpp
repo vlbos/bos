@@ -3094,7 +3094,7 @@ namespace eosio { namespace ibc {
             auto it = local_origtrxs.project<0>(it_trx_id);
             if ( it != local_origtrxs.end() ){
                ++it;
-               while ( it != local_origtrxs.end() && it->block_num <= lib_num ){
+               while ( it != local_origtrxs.end() && lwcls.first <= it->block_num && it->block_num <= lib_num ){
                   orig_trxs_to_push.push_back( *it );
                   ++it;
                }
@@ -3118,9 +3118,19 @@ namespace eosio { namespace ibc {
             to_push = orig_trxs_to_push;
          }
 
-         if ( to_push.back().trx_id != token_contract->last_origtrx_pushed ){
-            ilog("---------orig_trxs_to_push to push size ${n}",("n",to_push.size()));
-            token_contract->push_cash_trxs( to_push, range.second + 1 );  // todo: increase robustness, retry when failed.
+         static uint64_t highest_idx = 0;
+         static uint32_t times = 0;
+
+         if ( to_push.back().table_id > highest_idx ){
+            highest_idx = to_push.back().table_id;
+            times = 1;
+         }
+         if ( to_push.back().table_id == highest_idx ){
+            times += 1;
+         }
+         if ( times <= 2 ){
+            ilog("---------orig_trxs_to_push to push size ${n}, retry times ${try}",("n",to_push.size())("try",times));
+            token_contract->push_cash_trxs( to_push, range.second + 1 );
          }
       }
 
