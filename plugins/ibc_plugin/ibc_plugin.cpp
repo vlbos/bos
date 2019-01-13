@@ -177,7 +177,7 @@ namespace eosio { namespace ibc {
       ibc_transaction_index         local_origtrxs;
       ibc_transaction_index         local_cashtrxs;
       ibc_section_index             local_sections;
-      std::set<uint32_t>            new_prod_blk_nums;
+      uint32_t                      new_prod_blk_num = 0;
 
       string                        user_agent_name;
       chain_plugin*                 chain_plug = nullptr;
@@ -238,7 +238,6 @@ namespace eosio { namespace ibc {
       incremental_merkle get_brtm_from_cache( uint32_t block_num );
       uint32_t get_safe_head_tslot( );
 
-      void new_prod_blk_num_insert( uint32_t num );
       optional<ibc_trx_rich_info> get_ibc_trx_rich_info( uint32_t block_time_slot, transaction_id_type trx_id, uint64_t table_id );
 
       void check_if_remove_old_data_in_ibc_contracts();
@@ -2170,7 +2169,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg) {
       peer_ilog(c, "received ibc_heartbeat_message");
 
-      idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range));
+      idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.new_producers_block_num));
 
       // step one: check ibc_chain_state and lwcls
       if ( msg.ibc_chain_state == deployed ) {  // send lwc_init_message
@@ -2287,7 +2286,7 @@ namespace eosio { namespace ibc {
 
       // step four: check new_producers_block_num
       if ( msg.new_producers_block_num ){
-         new_prod_blk_num_insert( msg.new_producers_block_num );
+         new_prod_blk_num = msg.new_producers_block_num;
       }
    }
 
@@ -2801,15 +2800,6 @@ namespace eosio { namespace ibc {
       });
    }
 
-   void ibc_plugin_impl::new_prod_blk_num_insert( uint32_t num ){
-      if ( new_prod_blk_nums.size() > 10 ){
-         new_prod_blk_nums.erase(new_prod_blk_nums.begin());
-      }
-      if ( new_prod_blk_nums.find(num) != new_prod_blk_nums.end() ){
-         new_prod_blk_nums.insert( num );
-      }
-   }
-
    vector<digest_type>  get_merkle_path( vector<digest_type> ids, uint32_t num ) {
       if( 0 == ids.size() || num > ids.size() - 1 ) { return vector<digest_type>(); }
 
@@ -3027,7 +3017,7 @@ namespace eosio { namespace ibc {
       }
       section_type lwcls = *opt_sctn;
 
-      // calculation the minimun range of lwcls should reach through information of local_origtrxs, local_cashtrxs and new_prod_blk_nums
+      // calculation the minimun range of lwcls should reach through information of local_origtrxs, local_cashtrxs and new_prod_blk_num
       uint32_t min_last_num = lwcls.first + chain_contract->lwc_lib_depth ;
 
       if ( lwcls.np_num != 0 ){
@@ -3048,11 +3038,10 @@ namespace eosio { namespace ibc {
          ++it_cash;
       }
 
-      for ( const auto& num : new_prod_blk_nums ){
-         if ( lwcls.first <= num && num <= min_last_num ){
-            min_last_num = std::max( min_last_num,  num + BPScheduleReplaceMinLength + chain_contract->lwc_lib_depth );
-         }
+      if ( lwcls.first <= new_prod_blk_num && new_prod_blk_num <= min_last_num ){
+         min_last_num = std::max( min_last_num,  new_prod_blk_num + BPScheduleReplaceMinLength + chain_contract->lwc_lib_depth );
       }
+
 
       // check if lwcls reached the minimum range, if not, send lwc_section_request_message
       bool reached_min_length = true;
@@ -3216,18 +3205,20 @@ namespace eosio { namespace ibc {
             //ilog("cashtrxs has new trxs, start block ${n}",("n",start_blk_num));
          }
 
-         // --- check new_prod_blk_nums ---
-         for ( const auto& num : new_prod_blk_nums ){
-            if ( num >= lwcls.last ){
-               if ( start_blk_num != 0 ){
-                  start_blk_num = std::min( start_blk_num, num );
-               } else {
-                  start_blk_num = num;
-               }
-               break;
+         // --- check new_prod_blk_num ---
+         if ( new_prod_blk_num >= lwcls.last ){
+            if ( start_blk_num != 0 ){
+               start_blk_num = std::min( start_blk_num, new_prod_blk_num );
+            } else {
+               start_blk_num = new_prod_blk_num;
             }
+            break;
          }
 
+
+         idump((new_prod_blk_num));
+
+ilog("-----startblk num-----${n}",("n",start_blk_num));
          // --- summary ----
          if ( start_blk_num != 0 ){
             // check if has relate section in local store
