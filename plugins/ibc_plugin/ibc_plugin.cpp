@@ -3078,7 +3078,7 @@ namespace eosio { namespace ibc {
 
       uint32_t lib_num =  std::max( lwcls.first, lwcls.last > chain_contract->lwc_lib_depth ? lwcls.last - chain_contract->lwc_lib_depth : 1 );
 
-      // --- local_origtrxs ---
+      ///< --- local_origtrxs --- >///
       auto range = token_contract->get_table_cashtrxs_seq_num_range(true);
       if ( range.first == 0 ){   // range.first == 0 means cashtrxs is empty, range.second shoule alse be 0
          for( const auto& t : local_origtrxs.get<by_id>( ) ) {
@@ -3134,7 +3134,7 @@ namespace eosio { namespace ibc {
          }
       }
 
-      // --- local_cashtrxs ---
+      ///< --- local_cashtrxs --- >///
       auto gm_opt = token_contract->get_global_mutable_singleton();
       if ( !gm_opt.valid() ){
          elog("internal error, failed to get global_mutable_singleton");
