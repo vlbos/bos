@@ -3218,12 +3218,13 @@ namespace eosio { namespace ibc {
 
          // --- check new_prod_blk_nums ---
          for ( const auto& num : new_prod_blk_nums ){
-            if ( lwcls.last <= num && num <= start_blk_num ){
+            if ( num >= lwcls.last ){
                if ( start_blk_num != 0 ){
                   start_blk_num = std::min( start_blk_num, num );
                } else {
                   start_blk_num = num;
                }
+               break;
             }
          }
 
