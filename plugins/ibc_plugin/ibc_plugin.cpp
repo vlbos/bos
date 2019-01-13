@@ -1997,7 +1997,7 @@ namespace eosio { namespace ibc {
          blockroot_merkle_cache.erase( blockroot_merkle_cache.begin() );
       }
 
-      static constexpr uint32_t range = 2 << 10;
+      static constexpr uint32_t range = 2 << 10; // 2048
       if ( block->block_num % range == 0 ){
          ilog("push block ${n}'s block_merkle to chain contract",("n",block->block_num ));
          blockroot_merkle_type par;
@@ -2604,7 +2604,9 @@ namespace eosio { namespace ibc {
       if ( blockroot_merkle_cache.begin()->block_num <= block_num && block_num <= blockroot_merkle_cache.rbegin()->block_num ){
          return blockroot_merkle_cache[ block_num - blockroot_merkle_cache.begin()->block_num  ].merkle;
       }
-      return incremental_merkle();
+      incremental_merkle mkl;
+      mkl._node_count = 0;
+      return mkl;
    }
 
    uint32_t ibc_plugin_impl::get_safe_head_tslot(){
