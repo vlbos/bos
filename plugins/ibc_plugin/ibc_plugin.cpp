@@ -2344,35 +2344,40 @@ namespace eosio { namespace ibc {
             if ( mkl._node_count != 0 && mkl._active_nodes.size() > 0 ){
                ret_msg.blockroot_merkle = mkl;
                ret_msg.headers.push_back( *sbp );
-            } else {
-               // calculate it by known blockroot_merkles
+            } else {    // when node restart
                ilog("didn't find block_state of number ${n} in forkdb, calculate it by known blockroot_merkles",("n",check_num));
+               
                chain_contract->get_blkrtmkls_tb();
-               blockroot_merkle_type start_point;
-               for ( auto brtm : chain_contract->history_blockroot_merkles ) {
-                  if ( brtm.block_num <= check_num ){
-                     start_point = brtm;
+               static blockroot_merkle_type walk_point;
+               
+               if ( walk_point.block_num == 0 ){
+                  for ( auto brtm : chain_contract->history_blockroot_merkles ) {
+                     if ( walk_point.block_num < brtm.block_num && brtm.block_num <= check_num ){
+                        walk_point = brtm;
+                     }
                   }
                }
-               if ( start_point.block_num == 0 ){
-                  elog( "didn't find block_state of number ${n} in contract records", ("n", check_num));
+               
+               if ( walk_point.block_num == 0 ){
+                  elog("can not find fit blockroot_merkle to calculation blockroot_merkle of blcok ${n}", ("n",check_num));
+                  return;
                }
 
-               if ( start_point.block_num != 0 && check_num - start_point.block_num <= 3600*24*2*BlocksPerSecond ){ // 2 days
-                  while( start_point.block_num < check_num ){
-                     start_point.merkle.append( chain_plug->chain().get_block_id_for_num( start_point.block_num ) );
-                     start_point.block_num += 1;
+               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600 * 24 * 2; // 2 days
+               if ( check_num - walk_point.block_num <= max_interval_blocks ){
+                  while( walk_point.block_num < check_num ){
+                     walk_point.merkle.append( chain_plug->chain().get_block_id_for_num( walk_point.block_num ) );
+                     walk_point.block_num += 1;
                   }
-                  if (start_point.block_num == check_num ){
-                     ret_msg.blockroot_merkle = start_point.merkle;
-                     ret_msg.headers.push_back( *(chain_plug->chain().fetch_block_by_number(start_point.block_num)) );
+                  if (walk_point.block_num == check_num ){
+                     ret_msg.blockroot_merkle = walk_point.merkle;
+                     ret_msg.headers.push_back( *(chain_plug->chain().fetch_block_by_number(walk_point.block_num)) );
                   } else {
                      elog("internal error, calculate blockroot_merkle of block ${n} failed", ("n",check_num));
                      return;
                   }
                } else {
-                  elog("can not find fit blockroot_merkle to calculation blockroot_merkle of blcok ${n}", ("n",check_num));
-                  return;
+                  elog("available block are too far apart, check_num ${n1}, start_point_num${n2}",("n1",check_num)("n2",walk_point.block_num));
                }
             }
          }
