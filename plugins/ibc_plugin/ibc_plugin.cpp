@@ -1987,7 +1987,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::irreversible_block(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id));
+      /* fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id)); */
       blockroot_merkle_type brtm;
       brtm.block_num = block->block_num;
       brtm.merkle = block->blockroot_merkle;
@@ -2348,22 +2348,22 @@ namespace eosio { namespace ibc {
                ilog("didn't find block_state of number ${n} in forkdb, calculate it by known blockroot_merkles",("n",check_num));
                
                chain_contract->get_blkrtmkls_tb();
-               static blockroot_merkle_type walk_point;
-               
-               if ( walk_point.block_num == 0 ){
-                  for ( auto brtm : chain_contract->history_blockroot_merkles ) {
-                     if ( walk_point.block_num < brtm.block_num && brtm.block_num <= check_num ){
-                        walk_point = brtm;
-                     }
+               blockroot_merkle_type walk_point;
+
+               for ( auto brtm : chain_contract->history_blockroot_merkles ) {
+                  if ( walk_point.block_num < brtm.block_num && brtm.block_num <= check_num ){
+                     walk_point = brtm;
                   }
                }
-               
+
                if ( walk_point.block_num == 0 ){
                   elog("can not find fit blockroot_merkle to calculation blockroot_merkle of blcok ${n}", ("n",check_num));
                   return;
                }
 
-               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600 * 26; // 26 hours
+               ilog("find block ${b} with fit blockroot_merkle",("b",walk_point.block_num));
+
+               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600; // 1 hours
                if ( check_num - walk_point.block_num <= max_interval_blocks ){
                   while( walk_point.block_num < check_num ){
                      walk_point.merkle.append( chain_plug->chain().get_block_id_for_num( walk_point.block_num ) );
@@ -2613,6 +2613,9 @@ namespace eosio { namespace ibc {
       blockroot_merkle_cache.begin()->block_num <= block_num && block_num <= blockroot_merkle_cache.rbegin()->block_num ){
          return blockroot_merkle_cache[ block_num - blockroot_merkle_cache.begin()->block_num  ].merkle;
       }
+
+
+
       incremental_merkle mkl;
       mkl._node_count = 0;
       return mkl;
