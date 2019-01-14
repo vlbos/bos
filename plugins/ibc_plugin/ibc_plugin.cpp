@@ -1993,7 +1993,7 @@ namespace eosio { namespace ibc {
       brtm.merkle = block->blockroot_merkle;
 
       blockroot_merkle_cache.push_back( brtm );
-      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*2 ){ // two hours
+      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*24 ){ // one day
          blockroot_merkle_cache.erase( blockroot_merkle_cache.begin() );
       }
 
@@ -2695,51 +2695,24 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      signed_block_ptr check_begin, check_end;
-      try {
-         check_begin = chain_plug->chain().fetch_block_by_number( lwcls.last_num );
-         check_end = chain_plug->chain().fetch_block_by_number( local_safe_head_num );
-      } catch (...) {
-         elog("exception ocurred when fetch block ${n1}, ${n2}",("n1",lwcls.last_num)("n2",local_safe_head_num));
-         return;
+      static uint32_t check_block_num = 0;
+
+      if ( lwcls.last_num > check_block_num ){
+         check_block_num = lwcls.last_num;
       }
-      
-      if ( check_begin == signed_block_ptr() || check_end == signed_block_ptr() ){
-         elog("internal error, fetch block ${n1}, ${n2} failed",("n1",lwcls.last_num)("n2",local_safe_head_num));
-         return;
-      }
-      
+
       auto get_block_ptr = [=]( uint32_t num ) -> signed_block_ptr {
          return chain_plug->chain().fetch_block_by_number(num);
       };
 
-      // check if producer schedule updated
-      if ( check_begin->schedule_version < check_end->schedule_version ){
-         // find the last header whose schedule version equal to check_begin's schedule version, use binary search
-         signed_block_ptr search_first, search_middle, search_last;
-
-         search_first = check_begin;
-         search_last = check_end;
-         search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
-
-         while ( search_last->block_num() - search_first->block_num() >= 4 ){
-            if ( search_middle->schedule_version > search_first->schedule_version  ){
-               search_last = search_middle;
-               search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
-            } else {
-               search_first = search_middle;
-               search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
-            }
+      while ( check_block_num < local_safe_head_num ){
+         auto np_opt = get_block_ptr(check_block_num)->new_producers;
+         if ( np_opt.valid() && np_opt->producers.size() > 0 ){
+            msg.new_producers_block_num = check_block_num - 1;
+            ilog("find new_producers_block_num ${n}",("n",msg.new_producers_block_num));
+            return;
          }
-
-         for( uint32_t blk_num = search_first->block_num() + 1; blk_num <= search_last->block_num(); ++blk_num ){
-            if (  get_block_ptr( blk_num )->schedule_version == check_begin->schedule_version + 1  ){
-               msg.new_producers_block_num = blk_num - 1;
-               ilog("find new_producers_block_num ${n}", ("n", msg.new_producers_block_num));
-               return;
-            }
-         }
-         elog("internal errror, can't find fit block num for the next schedule_version");
+         ++check_block_num;
       }
    }
 
