@@ -2390,6 +2390,8 @@ namespace eosio { namespace ibc {
          }
          peer_ilog(c,"sending lwc_section_data_message, range [${from},${to}], merkle nodes ${nodes}", ("from",start_num)("to",tmp_end_num)("nodes",ret_msg.blockroot_merkle._active_nodes.size()));
          c->enqueue( ret_msg );
+
+         return; // send only once
       }
    }
 
@@ -2709,7 +2711,7 @@ namespace eosio { namespace ibc {
          auto np_opt = get_block_ptr(check_block_num)->new_producers;
          if ( np_opt.valid() && np_opt->producers.size() > 0 ){
             msg.new_producers_block_num = check_block_num - 1;
-            ilog("find new_producers_block_num ${n}",("n",msg.new_producers_block_num));
+            ilog("find new_producers_block_num ${n} < ---- new producers ---- >",("n",msg.new_producers_block_num));
             return;
          }
          ++check_block_num;
