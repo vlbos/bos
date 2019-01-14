@@ -2980,7 +2980,7 @@ namespace eosio { namespace ibc {
          cash_begin = local_cashtrxs.begin()->table_id;
          cash_end = local_cashtrxs.rbegin()->table_id;
       }
-      dlog("local_origtrxs id range [${of} - ${ot}], local_cashtrxs id range [${cf} - ${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
+      // ilog("local_origtrxs id range [${of} - ${ot}], local_cashtrxs id range [${cf} - ${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
 
 
       if ( chain_contract->state != working || token_contract->state != working ){
