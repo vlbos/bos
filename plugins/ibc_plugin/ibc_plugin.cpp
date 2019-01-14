@@ -2363,7 +2363,7 @@ namespace eosio { namespace ibc {
                   return;
                }
 
-               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600 * 24 * 2; // 2 days
+               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600 * 26; // 26 hours
                if ( check_num - walk_point.block_num <= max_interval_blocks ){
                   while( walk_point.block_num < check_num ){
                      walk_point.merkle.append( chain_plug->chain().get_block_id_for_num( walk_point.block_num ) );
@@ -2378,6 +2378,7 @@ namespace eosio { namespace ibc {
                   }
                } else {
                   elog("available block are too far apart, check_num ${n1}, start_point_num${n2}",("n1",check_num)("n2",walk_point.block_num));
+                  return;
                }
             }
          }
@@ -2387,7 +2388,7 @@ namespace eosio { namespace ibc {
             ret_msg.headers.push_back( *(chain_plug->chain().fetch_block_by_number( check_num )) );
             check_num += 1;
          }
-         peer_ilog(c,"sending lwc_section_data_message, range [${from},${to}]", ("from",start_num)("to",tmp_end_num));
+         peer_ilog(c,"sending lwc_section_data_message, range [${from},${to}], merkle nodes ${nodes}", ("from",start_num)("to",tmp_end_num)("nodes",ret_msg.blockroot_merkle._active_nodes.size()));
          c->enqueue( ret_msg );
       }
    }
@@ -2606,7 +2607,8 @@ namespace eosio { namespace ibc {
    }
 
    incremental_merkle ibc_plugin_impl::get_brtm_from_cache( uint32_t block_num ){
-      if ( blockroot_merkle_cache.begin()->block_num <= block_num && block_num <= blockroot_merkle_cache.rbegin()->block_num ){
+      if ( blockroot_merkle_cache.begin() != blockroot_merkle_cache.end() &&
+      blockroot_merkle_cache.begin()->block_num <= block_num && block_num <= blockroot_merkle_cache.rbegin()->block_num ){
          return blockroot_merkle_cache[ block_num - blockroot_merkle_cache.begin()->block_num  ].merkle;
       }
       incremental_merkle mkl;
