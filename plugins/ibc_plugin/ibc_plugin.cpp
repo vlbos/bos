@@ -2680,6 +2680,8 @@ namespace eosio { namespace ibc {
 
    // get  new producer schedule info for ibc_heartbeat_message to send, check if has new producer schedule since lwcls's last block
    void ibc_plugin_impl::chain_checker( ibc_heartbeat_message& msg ) {
+      msg.new_producers_block_num = 0;
+
       auto lwcls = sum_received_lwcls_info();
       if ( lwcls == lwc_section_type() ){
          ilog("doesn't receive any lwcls infomation from connected peer chain relay nodes");
@@ -2735,10 +2737,8 @@ namespace eosio { namespace ibc {
                return;
             }
          }
-
          elog("internal errror, can't find fit block num for the next schedule_version");
       }
-      msg.new_producers_block_num = 0;
    }
 
    // get lwcls info for ibc_heartbeat_message to send
