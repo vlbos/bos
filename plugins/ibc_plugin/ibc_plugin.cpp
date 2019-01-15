@@ -926,48 +926,49 @@ namespace eosio { namespace ibc {
       name account;
    };
 
-   optional<memo_info_type> ibc_token_contract::get_memo_info( const string& memo ){
-      auto get_item = [=]( string item ) -> string {
-         string search = string(" ") + item + "=";
-         auto pos = memo.find( search );
-         decltype(pos) pos_end;
-         if ( pos !=  std::string::npos ){
-            if ( item == "notes" ){
-               pos_end = memo.size();
-            } else {
-               pos_end = memo.find(" ", pos + search.length());
-               if( pos_end == std::string::npos ) {
-                  pos_end = memo.size();
-               }
-            }
-
-            auto start = pos + search.length();
-            auto count = pos_end - start;
-            auto res = memo.substr( start, count );
-            if( res.length() == 0){
-               elog("ibc system error, memo contain incomplete item");
-            }
-            return res;
-         } else {
-            return string();
-         }
-      };
-
-      string receiver_str = get_item("receiver");
-      string r_str = get_item("r");
+   optional<memo_info_type> ibc_token_contract::get_memo_info( const string& memo_str ){
 
       memo_info_type info;
-      if ( receiver_str != string() ){
-         info.receiver = name( receiver_str );
+
+      string memo = memo_str;
+      trim( memo );
+
+      // --- get receiver ---
+      auto pos = memo.find("@");
+      if ( pos == std::string::npos ){
+         elog("memo format error, didn't find charactor \'@\' in memo");
+         return optional<memo_info_type>();
+      }
+      
+      string receiver_str = memo.substr( 0, pos );
+      trim( receiver_str );
+      info.receiver = name( receiver_str );
+
+      // --- trim ---
+      memo = memo.substr( pos + 1 );
+      trim( memo );
+
+      // --- get chain name and notes ---
+      pos = memo.find(" ");
+      if ( pos == std::string::npos ){
+         info.chain = name( memo );
+         info.notes = "";
       } else {
-         if(  r_str == string() ){
-            elog("ibc system error, none of \"receiver\" or \"r\" is provided");
-            return optional<memo_info_type>();
-         }
-         info.receiver = name( r_str );
+         info.chain = name( memo.substr(0,pos) );
+         info.notes = memo.substr( pos + 1 );
+         trim( info.notes );
       }
 
-      info.notes = get_item("notes");
+      if ( info.receiver == name() ){
+         elog("memo format error, receiver not provided in memo");
+         return optional<memo_info_type>();
+      }
+
+      if ( info.chain == name() ){
+         elog("memo format error, chain not provided in memo");
+         return optional<memo_info_type>();
+      }
+      
       return info;
    }
 
