@@ -1172,7 +1172,7 @@ namespace eosio { namespace ibc {
             elog("push cash transaction failed, index ${i}",("i",index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            ilog("pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            dlog("pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
             next_seq_num += 1;
          }
 
@@ -1181,7 +1181,7 @@ namespace eosio { namespace ibc {
          if (next_index < params->size()) {
             push_cash_recurse( next_index, params, next_seq_num );
          } else {
-            ilog("all ${sum} cash transactions have tried to push, which belongs to blocks [${f},${t}]",
+            dlog("all ${sum} cash transactions have tried to push, which belongs to blocks [${f},${t}]",
                  ("sum",params->size())("f",params->front().orig_trx_block_num)("t",params->back().orig_trx_block_num));
          }
       };
@@ -1262,14 +1262,14 @@ namespace eosio { namespace ibc {
             return;
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            ilog("pushed cashconfirm transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            dlog("pushed cashconfirm transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
          }
 
          int next_index = index + 1;
          if (next_index < params->size()) {
             push_cashconfirm_recurse( next_index, params );
          } else {
-            ilog("successfully pushed all ${sum} cashconfirm transactions, which belongs to blocks [${f},${t}]",
+            dlog("successfully pushed all ${sum} cashconfirm transactions, which belongs to blocks [${f},${t}]",
                ("sum",params->size())("f",params->front().cash_trx_block_num)("t",params->back().cash_trx_block_num));
          }
       };
@@ -2170,7 +2170,11 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg) {
       peer_ilog(c, "received ibc_heartbeat_message");
 
-      idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.new_producers_block_num));
+      dlog("msg.origtrxs_table_id_range: [${of},${ot}] msg.cashtrxs_table_seq_num_range: [${cf},${ct}] msg.new_producers_block_num: ${n}",
+           (msg.origtrxs_table_id_range.first)(msg.origtrxs_table_id_range.second)
+           (msg.cashtrxs_table_seq_num_range.first)(msg.cashtrxs_table_seq_num_range.second)
+           (msg.new_producers_block_num));
+      // idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.new_producers_block_num));
 
       // step one: check ibc_chain_state and lwcls
       if ( msg.ibc_chain_state == deployed ) {  // send lwc_init_message
