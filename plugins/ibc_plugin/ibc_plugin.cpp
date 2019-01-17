@@ -926,48 +926,49 @@ namespace eosio { namespace ibc {
       name account;
    };
 
-   optional<memo_info_type> ibc_token_contract::get_memo_info( const string& memo ){
-      auto get_item = [=]( string item ) -> string {
-         string search = string(" ") + item + "=";
-         auto pos = memo.find( search );
-         decltype(pos) pos_end;
-         if ( pos !=  std::string::npos ){
-            if ( item == "notes" ){
-               pos_end = memo.size();
-            } else {
-               pos_end = memo.find(" ", pos + search.length());
-               if( pos_end == std::string::npos ) {
-                  pos_end = memo.size();
-               }
-            }
-
-            auto start = pos + search.length();
-            auto count = pos_end - start;
-            auto res = memo.substr( start, count );
-            if( res.length() == 0){
-               elog("ibc system error, memo contain incomplete item");
-            }
-            return res;
-         } else {
-            return string();
-         }
-      };
-
-      string receiver_str = get_item("receiver");
-      string r_str = get_item("r");
+   optional<memo_info_type> ibc_token_contract::get_memo_info( const string& memo_str ){
 
       memo_info_type info;
-      if ( receiver_str != string() ){
-         info.receiver = name( receiver_str );
+
+      string memo = memo_str;
+      trim( memo );
+
+      // --- get receiver ---
+      auto pos = memo.find("@");
+      if ( pos == std::string::npos ){
+         elog("memo format error, didn't find charactor \'@\' in memo");
+         return optional<memo_info_type>();
+      }
+      
+      string receiver_str = memo.substr( 0, pos );
+      trim( receiver_str );
+      info.receiver = name( receiver_str );
+
+      // --- trim ---
+      memo = memo.substr( pos + 1 );
+      trim( memo );
+
+      // --- get chain name and notes ---
+      pos = memo.find(" ");
+      if ( pos == std::string::npos ){
+         info.chain = name( memo );
+         info.notes = "";
       } else {
-         if(  r_str == string() ){
-            elog("ibc system error, none of \"receiver\" or \"r\" is provided");
-            return optional<memo_info_type>();
-         }
-         info.receiver = name( r_str );
+         info.chain = name( memo.substr(0,pos) );
+         info.notes = memo.substr( pos + 1 );
+         trim( info.notes );
       }
 
-      info.notes = get_item("notes");
+      if ( info.receiver == name() ){
+         elog("memo format error, receiver not provided in memo");
+         return optional<memo_info_type>();
+      }
+
+      if ( info.chain == name() ){
+         elog("memo format error, chain not provided in memo");
+         return optional<memo_info_type>();
+      }
+      
       return info;
    }
 
@@ -1171,7 +1172,7 @@ namespace eosio { namespace ibc {
             elog("push cash transaction failed, index ${i}",("i",index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            ilog("pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            dlog("pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
             next_seq_num += 1;
          }
 
@@ -1180,7 +1181,7 @@ namespace eosio { namespace ibc {
          if (next_index < params->size()) {
             push_cash_recurse( next_index, params, next_seq_num );
          } else {
-            ilog("all ${sum} cash transactions have tried to push, which belongs to blocks [${f},${t}]",
+            dlog("all ${sum} cash transactions have tried to push, which belongs to blocks [${f},${t}]",
                  ("sum",params->size())("f",params->front().orig_trx_block_num)("t",params->back().orig_trx_block_num));
          }
       };
@@ -1261,14 +1262,14 @@ namespace eosio { namespace ibc {
             return;
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            ilog("pushed cashconfirm transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            dlog("pushed cashconfirm transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
          }
 
          int next_index = index + 1;
          if (next_index < params->size()) {
             push_cashconfirm_recurse( next_index, params );
          } else {
-            ilog("successfully pushed all ${sum} cashconfirm transactions, which belongs to blocks [${f},${t}]",
+            dlog("successfully pushed all ${sum} cashconfirm transactions, which belongs to blocks [${f},${t}]",
                ("sum",params->size())("f",params->front().cash_trx_block_num)("t",params->back().cash_trx_block_num));
          }
       };
@@ -1987,13 +1988,13 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::irreversible_block(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id));
+      /* fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id)); */
       blockroot_merkle_type brtm;
       brtm.block_num = block->block_num;
       brtm.merkle = block->blockroot_merkle;
 
       blockroot_merkle_cache.push_back( brtm );
-      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*2 ){ // two hours
+      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*24 ){ // one day
          blockroot_merkle_cache.erase( blockroot_merkle_cache.begin() );
       }
 
@@ -2169,7 +2170,11 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg) {
       peer_ilog(c, "received ibc_heartbeat_message");
 
-      idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.new_producers_block_num));
+      dlog("msg.origtrxs_table_id_range: [${of},${ot}] msg.cashtrxs_table_seq_num_range: [${cf},${ct}] msg.new_producers_block_num: ${n}",
+           (msg.origtrxs_table_id_range.first)(msg.origtrxs_table_id_range.second)
+           (msg.cashtrxs_table_seq_num_range.first)(msg.cashtrxs_table_seq_num_range.second)
+           (msg.new_producers_block_num));
+      // idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.new_producers_block_num));
 
       // step one: check ibc_chain_state and lwcls
       if ( msg.ibc_chain_state == deployed ) {  // send lwc_init_message
@@ -2348,22 +2353,22 @@ namespace eosio { namespace ibc {
                ilog("didn't find block_state of number ${n} in forkdb, calculate it by known blockroot_merkles",("n",check_num));
                
                chain_contract->get_blkrtmkls_tb();
-               static blockroot_merkle_type walk_point;
-               
-               if ( walk_point.block_num == 0 ){
-                  for ( auto brtm : chain_contract->history_blockroot_merkles ) {
-                     if ( walk_point.block_num < brtm.block_num && brtm.block_num <= check_num ){
-                        walk_point = brtm;
-                     }
+               blockroot_merkle_type walk_point;
+
+               for ( auto brtm : chain_contract->history_blockroot_merkles ) {
+                  if ( walk_point.block_num < brtm.block_num && brtm.block_num <= check_num ){
+                     walk_point = brtm;
                   }
                }
-               
+
                if ( walk_point.block_num == 0 ){
                   elog("can not find fit blockroot_merkle to calculation blockroot_merkle of blcok ${n}", ("n",check_num));
                   return;
                }
 
-               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600 * 26; // 26 hours
+               ilog("find block ${b} with fit blockroot_merkle",("b",walk_point.block_num));
+
+               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600; // 1 hours
                if ( check_num - walk_point.block_num <= max_interval_blocks ){
                   while( walk_point.block_num < check_num ){
                      walk_point.merkle.append( chain_plug->chain().get_block_id_for_num( walk_point.block_num ) );
@@ -2390,6 +2395,8 @@ namespace eosio { namespace ibc {
          }
          peer_ilog(c,"sending lwc_section_data_message, range [${from},${to}], merkle nodes ${nodes}", ("from",start_num)("to",tmp_end_num)("nodes",ret_msg.blockroot_merkle._active_nodes.size()));
          c->enqueue( ret_msg );
+
+         return; // send only once
       }
    }
 
@@ -2611,6 +2618,9 @@ namespace eosio { namespace ibc {
       blockroot_merkle_cache.begin()->block_num <= block_num && block_num <= blockroot_merkle_cache.rbegin()->block_num ){
          return blockroot_merkle_cache[ block_num - blockroot_merkle_cache.begin()->block_num  ].merkle;
       }
+
+
+
       incremental_merkle mkl;
       mkl._node_count = 0;
       return mkl;
@@ -2695,51 +2705,24 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      signed_block_ptr check_begin, check_end;
-      try {
-         check_begin = chain_plug->chain().fetch_block_by_number( lwcls.last_num );
-         check_end = chain_plug->chain().fetch_block_by_number( local_safe_head_num );
-      } catch (...) {
-         elog("exception ocurred when fetch block ${n1}, ${n2}",("n1",lwcls.last_num)("n2",local_safe_head_num));
-         return;
+      static uint32_t check_block_num = 0;
+
+      if ( lwcls.last_num > check_block_num ){
+         check_block_num = lwcls.last_num;
       }
-      
-      if ( check_begin == signed_block_ptr() || check_end == signed_block_ptr() ){
-         elog("internal error, fetch block ${n1}, ${n2} failed",("n1",lwcls.last_num)("n2",local_safe_head_num));
-         return;
-      }
-      
+
       auto get_block_ptr = [=]( uint32_t num ) -> signed_block_ptr {
          return chain_plug->chain().fetch_block_by_number(num);
       };
 
-      // check if producer schedule updated
-      if ( check_begin->schedule_version < check_end->schedule_version ){
-         // find the last header whose schedule version equal to check_begin's schedule version, use binary search
-         signed_block_ptr search_first, search_middle, search_last;
-
-         search_first = check_begin;
-         search_last = check_end;
-         search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
-
-         while ( search_last->block_num() - search_first->block_num() >= 4 ){
-            if ( search_middle->schedule_version > search_first->schedule_version  ){
-               search_last = search_middle;
-               search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
-            } else {
-               search_first = search_middle;
-               search_middle = get_block_ptr( search_first->block_num() + ( search_last->block_num() - search_first->block_num() ) / 2 );
-            }
+      while ( check_block_num < local_safe_head_num ){
+         auto np_opt = get_block_ptr(check_block_num)->new_producers;
+         if ( np_opt.valid() && np_opt->producers.size() > 0 ){
+            msg.new_producers_block_num = check_block_num - 1;
+            ilog("find new_producers_block_num ${n} < ---- new producers ---- >",("n",msg.new_producers_block_num));
+            return;
          }
-
-         for( uint32_t blk_num = search_first->block_num() + 1; blk_num <= search_last->block_num(); ++blk_num ){
-            if (  get_block_ptr( blk_num )->schedule_version == check_begin->schedule_version + 1  ){
-               msg.new_producers_block_num = blk_num - 1;
-               ilog("find new_producers_block_num ${n}", ("n", msg.new_producers_block_num));
-               return;
-            }
-         }
-         elog("internal errror, can't find fit block num for the next schedule_version");
+         ++check_block_num;
       }
    }
 
@@ -3002,7 +2985,7 @@ namespace eosio { namespace ibc {
          cash_begin = local_cashtrxs.begin()->table_id;
          cash_end = local_cashtrxs.rbegin()->table_id;
       }
-      dlog("local_origtrxs id range [${of} - ${ot}], local_cashtrxs id range [${cf} - ${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
+      // ilog("local_origtrxs id range [${of} - ${ot}], local_cashtrxs id range [${cf} - ${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
 
 
       if ( chain_contract->state != working || token_contract->state != working ){
