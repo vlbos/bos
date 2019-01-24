@@ -415,11 +415,6 @@ struct controller_impl {
    ~controller_impl() {
       pending.reset();
 
-      if( thread_pool ) {
-         thread_pool->join();
-         thread_pool->stop();
-      }
-
       db.flush();
       reversible_blocks.flush();
    }
@@ -1893,9 +1888,6 @@ boost::asio::thread_pool& controller::get_thread_pool() {
 }
 
 std::future<block_state_ptr> controller::create_block_state_future( const signed_block_ptr& b ) {
-   return my->create_block_state_future( b );
-}
-
    return my->create_block_state_future( b );
 }
 
