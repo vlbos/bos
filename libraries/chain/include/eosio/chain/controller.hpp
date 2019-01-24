@@ -27,6 +27,7 @@ namespace eosio { namespace chain {
 
    class dynamic_global_property_object;
    class global_property_object;
+   class global_property2_object;     // *bos*
    class permission_object;
    class account_object;
    using resource_limits::resource_limits_manager;
@@ -45,11 +46,27 @@ namespace eosio { namespace chain {
       FULL,
       LIGHT
    };
+   // *bos begin*
+    enum  class list_type:int64_t {
+      actor_blacklist_type=1,
+      contract_blacklist_type,
+      resource_greylist_type,
+      list_type_count
+   };
+   enum  class list_action_type:int64_t
+   {
+      insert_type = 1,
+      remove_type,
+      list_action_type_count
+   };
+
+   // *bos end*
 
    class controller {
       public:
 
          struct config {
+            flat_set<account_name>   sender_bypass_whiteblacklist;
             flat_set<account_name>   actor_whitelist;
             flat_set<account_name>   actor_blacklist;
             flat_set<account_name>   contract_whitelist;
@@ -62,6 +79,7 @@ namespace eosio { namespace chain {
             uint64_t                 state_guard_size       =  chain::config::default_state_guard_size;
             uint64_t                 reversible_cache_size  =  chain::config::default_reversible_cache_size;
             uint64_t                 reversible_guard_size  =  chain::config::default_reversible_guard_size;
+            uint16_t                 thread_pool_size       =  chain::config::default_controller_thread_pool_size;
             bool                     read_only              =  false;
             bool                     force_all_checks       =  false;
             bool                     disable_replay_opts    =  false;
@@ -89,13 +107,13 @@ namespace eosio { namespace chain {
          ~controller();
 
          void add_indices();
-         void startup( const snapshot_reader_ptr& snapshot = nullptr );
+         void startup( std::function<bool()> shutdown, const snapshot_reader_ptr& snapshot = nullptr );
 
          /**
           * Starts a new pending block session upon which new transactions can
           * be pushed.
           */
-         void start_block( block_timestamp_type time = block_timestamp_type(), uint16_t confirm_block_count = 0 );
+         void start_block( block_timestamp_type time = block_timestamp_type(), uint16_t confirm_block_count = 0, std::function<signature_type(digest_type)> signer = nullptr );
 
          void abort_block();
 
@@ -139,13 +157,8 @@ namespace eosio { namespace chain {
          void commit_block();
          void pop_block();
 
-         void push_block( const signed_block_ptr& b, block_status s = block_status::complete );
-
-         /**
-          * Call this method when a producer confirmation is received, this might update
-          * the last bft irreversible block and/or cause a switch of forks
-          */
-         void push_confirmation( const header_confirmation& c );
+         std::future<block_state_ptr> create_block_state_future( const signed_block_ptr& b );
+         void push_block( std::future<block_state_ptr>& block_state_future );
 
          const chainbase::database& db()const;
 
@@ -190,6 +203,7 @@ namespace eosio { namespace chain {
          optional<block_id_type> pending_producer_block_id()const;
 
          const producer_schedule_type&    active_producers()const;
+         std::function<signature_type(digest_type)> pending_producer_signer()const;
          const producer_schedule_type&    pending_producers()const;
          optional<producer_schedule_type> proposed_producers()const;
 
@@ -207,6 +221,8 @@ namespace eosio { namespace chain {
          sha256 calculate_integrity_hash()const;
          void write_snapshot( const snapshot_writer_ptr& snapshot )const;
 
+         bool sender_avoids_whitelist_blacklist_enforcement( account_name sender )const;
+         void check_actor_list( const flat_set<account_name>& actors )const;
          void check_contract_list( account_name code )const;
          void check_action_list( account_name code, action_name action )const;
          void check_key_list( const public_key_type& key )const;
@@ -216,10 +232,18 @@ namespace eosio { namespace chain {
 
          void add_resource_greylist(const account_name &name);
          void remove_resource_greylist(const account_name &name);
+
+         // *bos begin*
+         const global_property2_object&        get_global_properties2()const;  // *bos*
+         void set_name_list(int64_t list, int64_t action, std::vector<account_name> name_list);
+         
+         // void list_add_name(const int list, const account_name &name);
+         // void list_remove_name(const int list, const account_name &name);
+         // *bos end*
+
          bool is_resource_greylisted(const account_name &name) const;
          const flat_set<account_name> &get_resource_greylist() const;
 
-         void validate_referenced_accounts( const transaction& t )const;
          void validate_expiration( const transaction& t )const;
          void validate_tapos( const transaction& t )const;
          void validate_db_available_size() const;

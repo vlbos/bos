@@ -575,12 +575,6 @@ class apply_context {
       void add_ram_usage( account_name account, int64_t ram_delta );
       void finalize_trace( action_trace& trace, const fc::time_point& start );
 
-   private:
-
-      void validate_referenced_accounts( const transaction& t )const;
-      void validate_expiration( const transaction& t )const;
-
-
    /// Fields:
    public:
 
@@ -594,6 +588,7 @@ class apply_context {
       bool                          privileged   = false;
       bool                          context_free = false;
       bool                          used_context_free_api = false;
+      uint64_t                      global_action_sequence = 0;
 
       generic_index<index64_object>                                  idx64;
       generic_index<index128_object>                                 idx128;
