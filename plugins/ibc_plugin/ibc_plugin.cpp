@@ -497,26 +497,44 @@ namespace eosio { namespace ibc {
             return optional<key_value_object>();
          }
 
+         // auto walk_table_nth_row = [&]( auto lower, auto upper ) -> optional<key_value_object>  {
+         //    for ( auto itr = lower,int i = 0; itr != upper && i < nth ; ++itr,++i ){
+         //       if (i == nth-1) {
+         //          const key_value_object &obj = *itr;
+         //          return obj;
+         //       }
+         //    }
+
+         //    return optional<key_value_object>();
+         // };
+
+         // if(reverse) {
+         //   return  walk_table_nth_row( boost::make_reverse_iterator(upper), boost::make_reverse_iterator(lower) );
+         // } 
+         
+         // return walk_table_nth_row( lower, upper );
+         
+
          ///lis   ==lower  >0 logic error 
          if ( reverse ){
             int i = nth;
             auto itr = --upper;
-            for (; itr != lower && i >= 0; --itr ){
-               if (i == 0) {
+            for (; itr != lower && i > 0; --itr ){
+               if (i == 1) {
                   const key_value_object &obj = *itr;
                   return obj;
                }
                --i;
             }
 
-            if ( i == 0 && itr == lower ){
+            if ( i == 1 && itr == lower ){
                return *lower;
             }
          } else {
             int i = nth;
             auto itr = lower;
-            for (; itr != upper && i >= 0; ++itr ){
-               if (i == 0) {
+            for (; itr != upper && i > 0; ++itr ){
+               if (i == 1) {
                   const key_value_object &obj = *itr;
                   return obj;
                }
@@ -2402,6 +2420,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data_message &msg) {
+      ///lis msg.headers.begin()  ==end()
       peer_ilog(c, "received lwc_section_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
 
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
@@ -2410,7 +2429,7 @@ namespace eosio { namespace ibc {
          return;
       }
       section_type ls = *p;
-      ///lis msg.headers.begin()  ==end()
+      
       uint32_t msg_first_num = msg.headers.begin()->block_num();
       uint32_t msg_last_num = msg.headers.rbegin()->block_num();
 
@@ -2457,7 +2476,7 @@ namespace eosio { namespace ibc {
          // construct and push section data
          incremental_merkle merkle = msg.blockroot_merkle;
          for ( int i = 0; i < identical_num - msg.headers.front().block_num(); ++i ){
-            merkle.append( msg.headers[i].id() );///lis  i 
+            merkle.append( msg.headers[i].id() ); ///lis i < headers.size()
          }
 
          lwc_section_data_message par;
@@ -2562,7 +2581,7 @@ namespace eosio { namespace ibc {
 
             auto it =  local_origtrxs.find( trx_info.table_id );
             if ( it == local_origtrxs.end() ) { // link        
-               if ( trx_info.table_id == local_origtrxs.rbegin()->table_id + 1 ){ ///lis  local_origtrxs.rbegin()==rend()
+               if (  local_origtrxs.rbegin()!=local_origtrxs.rend() && trx_info.table_id == local_origtrxs.rbegin()->table_id + 1 ){ ///lis 
                   local_origtrxs.insert(trx_info);
                } else {
                   peer_elog(c,"received unlinkable trxs_rich_info table: origtrxs, table_id: ${tb_id}, trx_id: ${trx_id}",("tb_id",trx_info.table_id)("trx_id",trx_info.trx_id));
@@ -2594,7 +2613,7 @@ namespace eosio { namespace ibc {
 
             auto it =  local_cashtrxs.find( trx_info.table_id );
             if ( it == local_cashtrxs.end() ) { // link
-               if ( trx_info.table_id == local_cashtrxs.rbegin()->table_id + 1 ){  ///lis  local_origtrxs.rbegin()==rend()
+               if ( local_cashtrxs.rbegin()!= local_cashtrxs.rend() && trx_info.table_id == local_cashtrxs.rbegin()->table_id + 1 ){  ///lis  
                   local_cashtrxs.insert(trx_info);
                } else {
                   peer_elog(c,"received unlinkable trxs_rich_info table: cashtrxs, table_id: ${tb_id}, trx_id: ${trx_id}",("tb_id",trx_info.table_id)("trx_id",trx_info.trx_id));
@@ -2685,7 +2704,7 @@ namespace eosio { namespace ibc {
 
       // check ibc.token contract
       if ( token_contract->state != working ){
-         token_contract->get_contract_state();  ///lis 
+         token_contract->get_contract_state();  ///lis next time ?
          ilog("ibc.token contract not in working state, current state: ${s}", ("s", contract_state_str( token_contract->state )));
          return false;
       }
