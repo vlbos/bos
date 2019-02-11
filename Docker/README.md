@@ -134,49 +134,11 @@ docker volume rm keosd-data-volume
 
 ### Docker Hub
 
-Docker Hub image available from [docker hub](https://hub.docker.com/r/boscore/bos/).
-Create a new `docker-compose.yaml` file with the content below
+Docker Hub images are now deprecated. New build images were discontinued on January 1st, 2019. The existing old images will be removed on June 1st, 2019.
 
-```bash
-version: "3"
+### EOSIO Testnet
 
-services:
-  nodeosd:
-    image: boscore/bos:latest
-    command: /opt/eosio/bin/nodeosd.sh --data-dir /opt/eosio/bin/data-dir -e --http-alias=nodeosd:8888 --http-alias=127.0.0.1:8888 --http-alias=localhost:8888
-    hostname: nodeosd
-    ports:
-      - 8888:8888
-      - 9876:9876
-    expose:
-      - "8888"
-    volumes:
-      - nodeos-data-volume:/opt/eosio/bin/data-dir
-
-  keosd:
-    image: boscore/bos:latest
-    command: /opt/eosio/bin/keosd --wallet-dir /opt/eosio/bin/data-dir --http-server-address=127.0.0.1:8900 --http-alias=localhost:8900 --http-alias=keosd:8900
-    hostname: keosd
-    links:
-      - nodeosd
-    volumes:
-      - keosd-data-volume:/opt/eosio/bin/data-dir
-
-volumes:
-  nodeos-data-volume:
-  keosd-data-volume:
-
-```
-
-*NOTE:* the default version is the latest, you can change it to what you want
-
-run `docker pull boscore/bos:latest`
-
-run `docker-compose up`
-
-### BOSCore Testnet
-
-We can easily set up a BOSCore local testnet using docker images. Just run the following commands:
+We can easily set up a EOSIO local testnet using docker images. Just run the following commands:
 
 Note: if you want to use the mongo db plugin, you have to enable it in your `data-dir/config.ini` first.
 

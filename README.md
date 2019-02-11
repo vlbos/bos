@@ -16,6 +16,14 @@ In order to encourage the development of DApp in BOS, the BOS Foundation will pr
 # Developer Rewards 
 
 An additional 0.8% issuance will be given to the BOS eco-contribution code developer every year. Fifty candidates will be nominated by the community. Top 50 BPs vote 40 winners to get the awards: the top 10 share 40%, people ranked 11 to 20 share 30%, the last 20 share the remaining 30% evenly. The reward happens once every 3 months and each reward will be carried out with a one-week publicity. It will be re-evaluated if there is a reasonable objection. And each reward list will be recorded on chain. 
+$ wget https://github.com/eosio/eos/releases/download/v1.6.0/eosio_1.6.0-1-ubuntu-18.04_amd64.deb
+$ sudo apt install ./eosio_1.6.0-1-ubuntu-18.04_amd64.deb
+$ wget https://github.com/eosio/eos/releases/download/v1.6.0/eosio_1.6.0-1-ubuntu-16.04_amd64.deb
+$ sudo apt install ./eosio_1.6.0-1-ubuntu-16.04_amd64.deb
+$ wget https://github.com/eosio/eos/releases/download/v1.6.0/eosio-1.6.0-1.el7.x86_64.rpm
+$ sudo yum install ./eosio-1.6.0-1.el7.x86_64.rpm
+$ wget https://github.com/eosio/eos/releases/download/v1.6.0/eosio-1.6.0-1.fc27.x86_64.rpm
+$ sudo yum install ./eosio-1.6.0-1.fc27.x86_64.rpm
 As BOS continues to develop, developer rewards will be appropriately adjusted to allow the community to provide more momentum for the evolution of BOS. 
 
 ## Links
