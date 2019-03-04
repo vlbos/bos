@@ -130,6 +130,7 @@ struct controller_impl {
    resource_limits_manager        resource_limits;
    authorization_manager          authorization;
    controller::config             conf;
+   controller::config             conf_from_system_contract;///< backup blacklist from system contract,distinguish from config.ini,command line and chain api
    chain_id_type                  chain_id;
    bool                           replaying= false;
    optional<fc::time_point>       replay_head_time;
@@ -417,9 +418,9 @@ struct controller_impl {
       }
 
       //*bos begin*
-      sync_name_list(list_type::actor_blacklist_type,true);
-      sync_name_list(list_type::contract_blacklist_type,true);
-      sync_name_list(list_type::resource_greylist_type,true);
+      sync_name_list(list_type::actor_blacklist_type);
+      sync_name_list(list_type::contract_blacklist_type);
+      sync_name_list(list_type::resource_greylist_type);
       //*bos end*
    }
 
@@ -711,69 +712,98 @@ struct controller_impl {
    // "bos begin"
    void set_name_list(list_type list, list_action_type action, std::vector<account_name> name_list)
    {
+      //set list from set_name_list action in system contract
        int64_t lst = static_cast<int64_t>(list);
 
       EOS_ASSERT(list >= list_type::actor_blacklist_type && list < list_type::list_type_count, transaction_exception, "unknown list type : ${l}, action: ${n}", ("l", static_cast<int64_t>(list))("n", static_cast<int64_t>(action)));
-      vector<flat_set<account_name> *> lists = {&conf.actor_blacklist, &conf.contract_blacklist, &conf.resource_greylist};
+    vector<flat_set<account_name> *> lists = {&conf.actor_blacklist, &conf.contract_blacklist, &conf.resource_greylist};
+      vector<flat_set<account_name> *> clists = {&conf_from_system_contract.actor_blacklist, &conf_from_system_contract.contract_blacklist, &conf_from_system_contract.resource_greylist};
+      const auto &gprops2 = db.get<global_property2_object>();
+     vector<const shared_vector<account_name>*> dblists = {
+         &gprops2.cfg.actor_blacklist, &gprops2.cfg.contract_blacklist,
+         &gprops2.cfg.resource_greylist};
       EOS_ASSERT(lists.size() == static_cast<int64_t>(list_type::list_type_count) - 1, transaction_exception, " list size wrong : ${l}, action: ${n}", ("l", static_cast<int64_t>(list))("n", static_cast<int64_t>(action)));
-
+      const shared_vector<account_name> &dblo = *dblists[lst - 1];
+      flat_set<account_name> &clo = *clists[lst - 1];
       flat_set<account_name> &lo = *lists[lst - 1];
+  
+      for (auto &a : dblo) {
+         clo.insert(a);
+      }
 
-      if (action == list_action_type::insert_type)
+      auto  update_lists = [&](auto& lsto){
+        if (action == list_action_type::insert_type)
       {
-         lo.insert(name_list.begin(), name_list.end());
+         lsto.insert(name_list.begin(), name_list.end());
       }
       else if (action == list_action_type::remove_type)
       {
          flat_set<account_name> name_set(name_list.begin(), name_list.end());
 
          flat_set<account_name> results;
-         results.reserve(lo.size());
-         set_difference(lo.begin(), lo.end(),
+         results.reserve(lsto.size());
+         set_difference(lsto.begin(), lsto.end(),
                         name_set.begin(), name_set.end(),
                         std::inserter(results,results.begin()));
 
-         lo = results;
+         lsto = results;
       }
+      };
 
-      sync_name_list(list);
+      update_lists(lo);
+      update_lists(clo);//save list from contract to memory,
+
+      auto insert_list = [&](auto &o) {
+        vector<shared_vector<account_name> *> olists = {
+            &o.cfg.actor_blacklist, 
+            &o.cfg.contract_blacklist,
+            &o.cfg.resource_greylist};
+          shared_vector<account_name> &olo = *olists[lst - 1];
+             // clear list from db and save merge result to db  object
+        olo.clear();
+        for (auto &a : clo) {
+          olo.push_back(a);
+        }
+      };
+
+      db.modify(gprops2, [&](auto &gp2) { 
+         insert_list(gp2); 
+         });
    }
 
-   void sync_list_and_db(list_type list, global_property2_object &gprops2,bool isMerge=false)
-   {
-      int64_t lst = static_cast<int64_t>(list);
-      EOS_ASSERT( list >= list_type::actor_blacklist_type && list < list_type::list_type_count, transaction_exception, "unknown list type : ${l}, ismerge: ${n}", ("l", static_cast<int64_t>(list))("n", isMerge));
-      vector<shared_vector<account_name> *> lists = {&gprops2.cfg.actor_blacklist, &gprops2.cfg.contract_blacklist, &gprops2.cfg.resource_greylist};
-      vector<flat_set<account_name> *> conflists = {&conf.actor_blacklist, &conf.contract_blacklist, &conf.resource_greylist};
-      EOS_ASSERT(lists.size() == static_cast<int64_t>(list_type::list_type_count) - 1, transaction_exception, " list size wrong : ${l}, ismerge: ${n}", ("l", static_cast<int64_t>(list))("n", isMerge));
-      shared_vector<account_name> &lo = *lists[lst - 1];
-      flat_set<account_name> &clo = *conflists[lst - 1];
+   void check_list_in_contract_db(list_type list,account_name account) {
+     
+     int64_t lst = static_cast<int64_t>(list);
 
-      if (isMerge)
-      {
-         //initialize,  merge elements and deduplication between list and db.result save to  list
-         for (auto &a : lo)
-         {
-            clo.insert(a);
-         }
-      }
+      EOS_ASSERT(list >= list_type::actor_blacklist_type && list < list_type::list_type_count, transaction_exception, "unknown list type : ${l}, action: ${n}", ("l", static_cast<int64_t>(list))("n", account));
 
-      //clear list from db and save merge result to db  object
-      lo.clear();
-      for (auto &a : clo)
-      {
-         lo.push_back(a);
-      }
+      vector<flat_set<account_name> *> clists = {&conf_from_system_contract.actor_blacklist, &conf_from_system_contract.contract_blacklist, &conf_from_system_contract.resource_greylist};
+     
+      flat_set<account_name> &clo = *clists[lst - 1];
+
+      EOS_ASSERT(clo.find(account) == clo.end(), transaction_exception, " do not remove item in contract db list , account: ${n}", ("n", account));
+          
    }
 
-   void sync_name_list(list_type list,bool isMerge=false)
+   void sync_name_list(list_type list)
    {
       try
       {
-         const auto &gpo2 = db.get<global_property2_object>();
-         db.modify(gpo2, [&](auto &gprops2) {
-            sync_list_and_db(list, gprops2, isMerge);
-         });
+       
+        int64_t lst = static_cast<int64_t>(list);
+      EOS_ASSERT( list >= list_type::actor_blacklist_type && list < list_type::list_type_count, transaction_exception, "unknown list type : ${l}", ("l", static_cast<int64_t>(list)));
+       const auto &gprops2 = db.get<global_property2_object>();
+      vector<const shared_vector<account_name> *> dblists = {&gprops2.cfg.actor_blacklist, &gprops2.cfg.contract_blacklist, &gprops2.cfg.resource_greylist};
+      vector<flat_set<account_name> *> lists = {&conf.actor_blacklist, &conf.contract_blacklist, &conf.resource_greylist};
+      EOS_ASSERT(lists.size() == static_cast<int64_t>(list_type::list_type_count) - 1, transaction_exception, " list size wrong : ${l}, ismerge: ${n}", ("l", static_cast<int64_t>(list)));
+      const  shared_vector<account_name> &dblo = *dblists[lst - 1];
+      flat_set<account_name> &lo = *lists[lst - 1];
+
+         //initialize,  merge elements and remove duplication between list and db.result save to  list
+         for (auto &a : dblo)
+         {
+            lo.insert(a);
+         }
       }
       catch (...)
       {
@@ -1944,21 +1974,12 @@ void controller::set_actor_whitelist( const flat_set<account_name>& new_actor_wh
 }
 void controller::set_actor_blacklist( const flat_set<account_name>& new_actor_blacklist ) {
    my->conf.actor_blacklist = new_actor_blacklist;
-
-   // *bos begin*
-   my->sync_name_list(list_type::actor_blacklist_type);
-   // *bos end*
 }
 void controller::set_contract_whitelist( const flat_set<account_name>& new_contract_whitelist ) {
    my->conf.contract_whitelist = new_contract_whitelist;
 }
 void controller::set_contract_blacklist( const flat_set<account_name>& new_contract_blacklist ) {
-   my->conf.contract_blacklist = new_contract_blacklist;
-
-   // *bos begin*
-  my->sync_name_list(list_type::contract_blacklist_type);
-   // *bos end*
-
+    my->conf.contract_blacklist = new_contract_blacklist;
 }
 void controller::set_action_blacklist( const flat_set< pair<account_name, action_name> >& new_action_blacklist ) {
    for (auto& act: new_action_blacklist) {
@@ -2355,19 +2376,17 @@ void controller::set_subjective_cpu_leeway(fc::microseconds leeway) {
 
 void controller::add_resource_greylist(const account_name &name) {
    my->conf.resource_greylist.insert(name);
-
-   // *bos begin*
-   my->sync_name_list(list_type::resource_greylist_type);
-   // *bos end*
 }
 
 void controller::remove_resource_greylist(const account_name &name) {
 
+   // *bos begin*
+   my->check_list_in_contract_db(list_type::resource_greylist_type,name);
+   // *bos end*
+
    my->conf.resource_greylist.erase(name);
 
-   // *bos begin*
-   my->sync_name_list(list_type::resource_greylist_type);
-   // *bos end*
+   
 }
 
 bool controller::is_resource_greylisted(const account_name &name) const {
@@ -2385,11 +2404,6 @@ const global_property2_object& controller::get_global_properties2()const {
 
 void controller::set_name_list(int64_t list, int64_t action, std::vector<account_name> name_list)
 {
-   //redundant sync
-   my->sync_name_list(list_type::actor_blacklist_type, true);
-   my->sync_name_list(list_type::contract_blacklist_type, true);
-   my->sync_name_list(list_type::resource_greylist_type, true);
-
    my->set_name_list(static_cast<list_type>(list), static_cast<list_action_type>(action), name_list);
 }
 // *bos end*
