@@ -364,7 +364,7 @@ namespace eosio { namespace chain {
                                     3120012, "Secure Enclave Exception" )
 
 
-   FC_DECLARE_DERIVED_EXCEPTION( whitelist_blacklist_exception,   chain_exception,
+      FC_DECLARE_DERIVED_EXCEPTION( whitelist_blacklist_exception,   chain_exception,
                                  3130000, "Actor or contract whitelist/blacklist exception" )
 
       FC_DECLARE_DERIVED_EXCEPTION( actor_whitelist_exception,    whitelist_blacklist_exception,
@@ -380,7 +380,7 @@ namespace eosio { namespace chain {
       FC_DECLARE_DERIVED_EXCEPTION( key_blacklist_exception,      whitelist_blacklist_exception,
                                     3130006, "Public key in authority is on the blacklist" )
 
-   FC_DECLARE_DERIVED_EXCEPTION( controller_emit_signal_exception, chain_exception,
+      FC_DECLARE_DERIVED_EXCEPTION( controller_emit_signal_exception, chain_exception,
                                  3140000, "Exceptions that are allowed to bubble out of emit calls in controller" )
       FC_DECLARE_DERIVED_EXCEPTION( checkpoint_exception,          controller_emit_signal_exception,
                                    3140001, "Block does not match checkpoint" )
