@@ -788,7 +788,7 @@ struct controller_impl {
           break;
        default:
           EOS_ASSERT(false, transaction_exception,
-                     "unknown list type : ${blklsttype}, account: ${account}", ("blklsttype", blacklist_type)("account", account));
+                     "unknown list type : ${blklsttype}, account: ${account}", ("blklsttype",static_cast<uint64_t>(blacklist_type))("account", account));
        }
    }
 
