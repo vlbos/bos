@@ -1984,12 +1984,15 @@ void controller::set_actor_whitelist( const flat_set<account_name>& new_actor_wh
 }
 void controller::set_actor_blacklist( const flat_set<account_name>& new_actor_blacklist ) {
    my->conf.actor_blacklist = new_actor_blacklist;
+   my->merge_msig_blacklist_into_conf(); ///bos  merge multisig blacklist into conf after api reset blacklist
 }
 void controller::set_contract_whitelist( const flat_set<account_name>& new_contract_whitelist ) {
    my->conf.contract_whitelist = new_contract_whitelist;
 }
 void controller::set_contract_blacklist( const flat_set<account_name>& new_contract_blacklist ) {
-    my->conf.contract_blacklist = new_contract_blacklist;
+
+   my->conf.contract_blacklist = new_contract_blacklist;
+   my->merge_msig_blacklist_into_conf(); ///bos   merge multisig blacklist into conf after api reset blacklist
 }
 void controller::set_action_blacklist( const flat_set< pair<account_name, action_name> >& new_action_blacklist ) {
    for (auto& act: new_action_blacklist) {
@@ -2359,15 +2362,9 @@ void controller::add_resource_greylist(const account_name &name) {
    my->conf.resource_greylist.insert(name);
 }
 
-void controller::remove_resource_greylist(const account_name &name) {
-
-   // *bos begin*
-   my->check_msig_blacklist(list_type::resource_greylist_type,name);
-   // *bos end*
-
+void controller::remove_resource_greylist(const account_name &name){
+   my->check_msig_blacklist(list_type::resource_greylist_type, name);///bos
    my->conf.resource_greylist.erase(name);
-
-   
 }
 
 bool controller::is_resource_greylisted(const account_name &name) const {
