@@ -2363,7 +2363,7 @@ void controller::add_resource_greylist(const account_name &name) {
    my->conf.resource_greylist.insert(name);
 }
 
-void controller::remove_resource_greylist(const account_name &name){
+void controller::remove_resource_greylist(const account_name &name) {
    my->check_msig_blacklist(list_type::resource_greylist_type, name);///bos
    my->conf.resource_greylist.erase(name);
 }
