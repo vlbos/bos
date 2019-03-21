@@ -692,6 +692,15 @@ struct controller_impl {
    }
 
    // "bos begin"
+   //  contract   wasm interface api  set_name_list  function
+   //  insert action      db_list U msig_list -> msig_list    db_list U conf_list -> conf_list
+   //                     name_list U msig_list -> msig_list   name_list U conf_list -> conf_list    msig_list->db_list
+   //  remove action      db_list U msig_list -> msig_list    db_list U conf_list -> conf_list
+   //                     msig_list-name_list  -> msig_list    conf_list - name_list  -> conf_list   msig_list->db_list
+   //  producer  api  set_whitelist_blacklist
+   //                     blacklst ->  conf.xxx_blacklist     conf_list U msig_list  -> conf_list 
+   //                 remove_grey_list
+   //                     check   if remove acount in msig_list  then  assert fail  could not remove account in msig blacklist
    void set_name_list(list_type list, list_action_type action, std::vector<account_name> name_list)
    {
       //set list from set_name_list action in system contract
