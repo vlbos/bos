@@ -692,6 +692,10 @@ struct controller_impl {
    }
 
    // "bos begin"
+   //  controller  init
+   //  db_list U conf_list -> conf_list   
+   //  may be executed  in set_whitelist_blacklist producer api when plugin initialize and the blacklists arenot empty in config.ini
+   //  try catch ignore it
    //  contract   wasm interface api  set_name_list  function
    //  insert action      db_list U msig_list -> msig_list    db_list U conf_list -> conf_list
    //                     name_list U msig_list -> msig_list   name_list U conf_list -> conf_list    msig_list->db_list
