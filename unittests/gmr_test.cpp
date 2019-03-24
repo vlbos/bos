@@ -42,7 +42,7 @@ try
    const account_name account(1);
    const uint64_t increment = 100000;
    initialize_account(account);
-   set_account_limits(account, 2000, 0, 0);
+   set_account_limits(account, 9000, 0, 0);
    initialize_account(N(dan));
    initialize_account(N(everyone));
    set_account_limits(N(dan), 0, 0, 10000);
@@ -70,7 +70,7 @@ try
    auto arl = get_account_cpu_limit_ex(account, true);
 
    BOOST_TEST(arl.available >= 9997);
-   // BOOST_REQUIRE_THROW(add_transaction_usage({account}, increment*2, 0, 0), block_resource_exhausted);
+   BOOST_REQUIRE_THROW(add_transaction_usage({account}, increment, 0, 0), block_resource_exhausted);
 }
 FC_LOG_AND_RETHROW();
 
