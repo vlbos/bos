@@ -90,7 +90,6 @@ struct variant_snapshot_suite {
       {}
    };
 
-
    static auto get_writer() {
       return std::make_shared<writer>(std::make_shared<write_storage_t>());
    }

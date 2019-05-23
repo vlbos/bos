@@ -953,7 +953,6 @@ producer_plugin::snapshot_information producer_plugin::create_snapshot() const {
    EOS_ASSERT( !fc::is_regular_file(snapshot_path), snapshot_exists_exception,
                "snapshot named ${name} already exists", ("name", snapshot_path));
 
-
    auto snap_out = std::ofstream(snapshot_path, (std::ios::out | std::ios::binary));
    auto writer = std::make_shared<ostream_snapshot_writer>(snap_out);
    chain.write_snapshot(writer);
@@ -962,6 +961,36 @@ producer_plugin::snapshot_information producer_plugin::create_snapshot() const {
    snap_out.close();
 
    return {head_id, snapshot_path};
+}
+
+producer_plugin::table_snapshot_information producer_plugin::export_table_snapshot(const producer_plugin::table_snapshot_params& params) const{
+   chain::controller& chain = my->chain_plug->chain();
+
+   auto reschedule = fc::make_scoped_exit([this](){
+      my->schedule_production_loop();
+   });
+
+   if (chain.pending_block_state()) {
+      // abort the pending block
+      chain.abort_block();
+   } else {
+      reschedule.cancel();
+   }
+
+   auto head_id = chain.head_block_id();
+   std::string snapshot_path = (my->_snapshots_dir / fc::format_string("${tablename}-table-${id}.json", fc::mutable_variant_object()("tablename", params.table_name)("id", head_id))).generic_string();
+
+   EOS_ASSERT( !fc::is_regular_file(snapshot_path), snapshot_exists_exception,
+               "table snapshot named ${name} already exists", ("name", snapshot_path));
+
+   // auto snap_out = std::ofstream(snapshot_path, (std::ios::out | std::ios::binary));
+   // auto writer = std::make_shared<ostream_snapshot_writer>(snap_out);
+   chain.write_table_snapshot(params.table_name,snapshot_path);
+   // writer->finalize();
+   // snap_out.flush();
+   // snap_out.close();
+
+   return {snapshot_path};
 }
 
 optional<fc::time_point> producer_plugin_impl::calculate_next_block_time(const account_name& producer_name, const block_timestamp_type& current_block_time) const {

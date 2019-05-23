@@ -36,6 +36,7 @@ add_library( eosio_chain
               abi_serializer.cpp
               asset.cpp
               snapshot.cpp
+              table_snapshot.cpp
 
              webassembly/wavm.cpp
              webassembly/wabt.cpp

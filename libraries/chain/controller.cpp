@@ -24,6 +24,7 @@
 #include <fc/scoped_exit.hpp>
 #include <fc/variant_object.hpp>
 
+#include <eosio/chain/table_snapshot.hpp>
 
 namespace eosio { namespace chain {
 
@@ -452,6 +453,34 @@ struct controller_impl {
       });
    }
 
+
+   void add_to_table_snapshot( const string& table_name,const string& snapshot_path) const {
+
+     eosio::table_snapshot_apis::table_snapshot plugin(
+         self, fc::microseconds(INT_MAX));
+     eosio::table_snapshot_apis::table_snapshot::get_table_rows_params p;
+     p.code = N(eosio);
+     p.scope = "eosio";
+     p.table = name(table_name);//N(voters);
+     p.json = true;
+     p.index_position = "primary";
+     eosio::table_snapshot_apis::table_snapshot::get_table_rows_result result =
+         plugin.get_table_rows(p);
+
+     const bfs::path genesis_path = snapshot_path;
+         // bfs::current_path() /
+         // "table_snapshot.json"; /// genesis.is_complete() ? genesis :
+                                /// bfs::current_path() / genesis;
+     elog(genesis_path.string());
+     if (!bfs::exists(genesis_path)) {
+       // cout << "generating default genesis file " << genesis_path << endl;
+       elog(genesis_path.string());
+       // eosio::chain::genesis_state default_genesis;
+       fc::json::save_to_file(result, genesis_path, true);
+     }
+
+   }
+   
    void read_contract_tables_from_snapshot( const snapshot_reader_ptr& snapshot ) {
       snapshot->read_section("contract_tables", [this]( auto& section ) {
          bool more = !section.empty();
@@ -1954,6 +1983,11 @@ sha256 controller::calculate_integrity_hash()const { try {
 void controller::write_snapshot( const snapshot_writer_ptr& snapshot ) const {
    EOS_ASSERT( !my->pending, block_validate_exception, "cannot take a consistent snapshot with a pending block" );
    return my->add_to_snapshot(snapshot);
+}
+
+void controller::write_table_snapshot( const std::string& table_name,const string& snapshot_path ) const {
+   EOS_ASSERT( !my->pending, block_validate_exception, "cannot take a consistent snapshot with a pending block" );
+   return my->add_to_table_snapshot(table_name,snapshot_path);
 }
 
 void controller::pop_block() {

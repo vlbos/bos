@@ -196,6 +196,7 @@ namespace eosio { namespace chain {
 
          sha256 calculate_integrity_hash()const;
          void write_snapshot( const snapshot_writer_ptr& snapshot )const;
+         void write_table_snapshot( const std::string& table_name,const string& snapshot_path ) const ;
 
          bool sender_avoids_whitelist_blacklist_enforcement( account_name sender )const;
          void check_actor_list( const flat_set<account_name>& actors )const;
