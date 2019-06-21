@@ -54,7 +54,16 @@ namespace eosio {
         my->checkpoint_timer = std::make_unique<boost::asio::steady_timer>(app().get_io_service());
     }
 
+ unsigned long getThreadId()
+    {
+        std::string threadId=boost::lexical_cast<std::string>(boost::this_thread::get_id());
+        unsigned long  threadNumber=0;
+        threadNumber =std::stoul(threadId,nullptr,16);
+        return threadNumber;
+    }
     void pbft_plugin::plugin_startup() {
+              getThreadId();
+            wlog ("=========**************=======================plugin_startup: ${m}", ("m", getThreadId()));
         my->prepare_timer_tick();
         my->commit_timer_tick();
         my->view_change_timer_tick();
@@ -64,10 +73,14 @@ namespace eosio {
     void pbft_plugin::plugin_shutdown() {
     }
 
+
+
     void pbft_plugin_impl::prepare_timer_tick() {
         chain::pbft_controller &pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         prepare_timer->expires_from_now(prepare_timeout);
         prepare_timer->async_wait([&](boost::system::error_code ec) {
+            getThreadId();
+            wlog ("=========**************=======================prepare_timer_tick: ${m}", ("m", getThreadId()));
             prepare_timer_tick();
             if (ec) {
                 wlog ("pbft plugin prepare timer tick error: ${m}", ("m", ec.message()));
@@ -81,6 +94,8 @@ namespace eosio {
         chain::pbft_controller &pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         commit_timer->expires_from_now(commit_timeout);
         commit_timer->async_wait([&](boost::system::error_code ec) {
+                  getThreadId();
+            wlog ("=========**************=======================commit_timer_tick: ${m}", ("m", getThreadId()));
             commit_timer_tick();
             if (ec) {
                 wlog ("pbft plugin commit timer tick error: ${m}", ("m", ec.message()));
@@ -99,6 +114,8 @@ namespace eosio {
         }
         view_change_timer->expires_from_now(view_change_timeout);
         view_change_timer->async_wait([&](boost::system::error_code ec) {
+                  getThreadId();
+            wlog ("=========**************=======================view_change_timer_tick: ${m}", ("m", getThreadId()));
             view_change_timer_tick();
             if (ec) {
                 wlog ("pbft plugin view change timer tick error: ${m}", ("m", ec.message()));
@@ -112,6 +129,8 @@ namespace eosio {
         chain::pbft_controller &pbft_ctrl = app().get_plugin<chain_plugin>().pbft_ctrl();
         checkpoint_timer->expires_from_now(checkpoint_timeout);
         checkpoint_timer->async_wait([&](boost::system::error_code ec) {
+                  getThreadId();
+            wlog ("=========**************=======================checkpoint_timer_tick: ${m}", ("m", getThreadId()));
             checkpoint_timer_tick();
             if (ec) {
                 wlog ("pbft plugin checkpoint timer tick error: ${m}", ("m", ec.message()));

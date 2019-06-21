@@ -371,6 +371,14 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
             if( trx->signing_keys_future.valid() )
                trx->signing_keys_future.wait();
             app().get_io_service().post( [self, trx, persist_until_expired, next]() {
+               auto xxgetThreadId = []()->unsigned long 
+    {
+        std::string threadId=boost::lexical_cast<std::string>(boost::this_thread::get_id());
+        unsigned long  threadNumber=0;
+        threadNumber =std::stoul(threadId,nullptr,16);
+        return threadNumber;
+    };
+          wlog ("=========**************======================= self->process_incoming_transaction_async: ${m}", ("m", xxgetThreadId()));
                self->process_incoming_transaction_async( trx, persist_until_expired, next );
             });
          });
@@ -1067,7 +1075,21 @@ enum class tx_category {
 };
 
 
+ unsigned long xgetThreadId()
+    {
+        std::string threadId=boost::lexical_cast<std::string>(boost::this_thread::get_id());
+        unsigned long  threadNumber=0;
+        threadNumber =std::stoul(threadId,nullptr,16);
+        return threadNumber;
+    }
+
+             
+
 producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
+
+   //  mytest::getThreadId();
+            wlog ("=========**************=======================producer_plugin_impl::start_block: ${m}", ("m",  xgetThreadId()));
+
    chain::controller& chain = chain_plug->chain();
 
    if( chain.get_read_mode() == chain::db_read_mode::READ_ONLY )

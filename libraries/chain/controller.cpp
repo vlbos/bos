@@ -170,7 +170,35 @@ struct controller_impl {
       if ( read_mode == db_read_mode::SPECULATIVE ) {
          EOS_ASSERT( head->block, block_validate_exception, "attempting to pop a block that was sparsely loaded from a snapshot");
          for( const auto& t : head->trxs )
+         {
+           uint64_t m = t.use_count();
+             const void* m1 = static_cast<const void*>(t.get());
+           
+           std::stringstream ss;
+           ss << m1 ;
+           unapplied_transactions_type::iterator it  = unapplied_transactions.find(t->signed_id);
+           if(it != unapplied_transactions.end())
+           {
+         uint64_t m2 = it->second.use_count();
+           const void* m3 = static_cast<const void*>(it->second.get());
+           ss << "m3:" ;
+           ss << m3 ;
+              wlog ("=========^^^^^&&&&&&&&&&&&&====================== pop_block unapplied_transactions[t->signed_id] ref sid: ${m},c:${m1},u:${m2},a:${m3}", ("m", m)("m1", ss.str())("m2", m2)("m3", 3));
+           }
+         
             unapplied_transactions[t->signed_id] = t;
+          wlog ("=========@@@@@@@@############======================= pop_block unapplied_transactions[t->signed_id] ref sid: ${m},c:${m1},u:${m2},a:${m3}", ("m", m)("m1", ss.str())("m2", 2)("m3", 3));
+         }
+        
+             auto xxgetThreadId = []()->unsigned long 
+    {
+        std::string threadId=boost::lexical_cast<std::string>(boost::this_thread::get_id());
+        unsigned long  threadNumber=0;
+        threadNumber =std::stoul(threadId,nullptr,16);
+        return threadNumber;
+    };
+          wlog ("=========*$$$$$$$$$$$$$$*************======================= pop_block: ${m}", ("m", xxgetThreadId()));
+         
       }
       head = prev;
       db.undo();
@@ -1218,7 +1246,6 @@ struct controller_impl {
 
       if ( !subjective ) {
          // hard failure logic
-
          if( !explicit_billed_cpu_time ) {
             auto& rl = self.get_mutable_resource_limits_manager();
             rl.update_account_usage( trx_context.bill_to_accounts, block_timestamp_type(self.pending_block_time()).slot );
@@ -1619,10 +1646,20 @@ struct controller_impl {
       auto pbft = pbft_enabled;
 
       return async_thread_pool( thread_pool, [b, prev, pbft]() {
+         auto xxgetThreadId = []()->unsigned long 
+    {
+        std::string threadId=boost::lexical_cast<std::string>(boost::this_thread::get_id());
+        unsigned long  threadNumber=0;
+        threadNumber =std::stoul(threadId,nullptr,16);
+        return threadNumber;
+    };
+          wlog ("=========**************=======================create_block_state_future: ${m}", ("m", xxgetThreadId()));
          const bool skip_validate_signee = false;
          return std::make_shared<block_state>( *prev, move( b ), skip_validate_signee, pbft);
       } );
    }
+
+ 
 
    void push_block( std::future<block_state_ptr>& block_state_future ) {
       controller::block_status s = controller::block_status::complete;
@@ -1807,6 +1844,15 @@ struct controller_impl {
          if ( read_mode == db_read_mode::SPECULATIVE ) {
             for( const auto& t : pending->_pending_block_state->trxs )
                unapplied_transactions[t->signed_id] = t;
+               auto xxgetThreadId = []()->unsigned long 
+    {
+        std::string threadId=boost::lexical_cast<std::string>(boost::this_thread::get_id());
+        unsigned long  threadNumber=0;
+        threadNumber =std::stoul(threadId,nullptr,16);
+        return threadNumber;
+    };
+          wlog ("=========*$$$$$$$$$$$$$$*************======================= pop_block: ${m}", ("m", xxgetThreadId()));
+          
          }
          pending.reset();
       }

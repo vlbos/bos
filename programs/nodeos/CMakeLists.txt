@@ -1,4 +1,8 @@
+set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/externals/sanitizers-cmake/cmake" ${CMAKE_MODULE_PATH})
+set(SANITIZE_ADDRESS TRUE)
+find_package(Sanitizers)
 add_executable( ${NODE_EXECUTABLE_NAME} main.cpp )
+add_sanitizers(${NODE_EXECUTABLE_NAME})
 
 if( UNIX AND NOT APPLE )
   set(rt_library rt )

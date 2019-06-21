@@ -89,6 +89,15 @@ enum return_codes {
    NODE_MANAGEMENT_SUCCESS = 5
 };
 
+ unsigned long getThreadId()
+    {
+        std::string threadId=boost::lexical_cast<std::string>(boost::this_thread::get_id());
+        unsigned long  threadNumber=0;
+        threadNumber =std::stoul(threadId,nullptr,16);
+        return threadNumber;
+    }
+
+         
 int main(int argc, char** argv)
 {
    try {
@@ -109,8 +118,11 @@ int main(int argc, char** argv)
       ilog("eosio root is ${root}", ("root", root.string()));
       ilog("nodeos using configuration file ${c}", ("c", app().full_config_file_path().string()));
       ilog("nodeos data directory is ${d}", ("d", app().data_dir().string()));
+        wlog ("=========**************=======================main: ${m}", ("m", getThreadId()));
       app().startup();
       app().exec();
+
+    
    } catch( const extract_genesis_state_exception& e ) {
       return EXTRACTED_GENESIS;
    } catch( const fixed_reversible_db_exception& e ) {
