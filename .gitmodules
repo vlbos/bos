@@ -30,3 +30,6 @@
 [submodule "libraries/wabt"]
 	path = libraries/wabt
 	url = https://github.com/EOSIO/wabt
+[submodule "externals/externals/sanitizers-cmake"]
+	path = externals/externals/sanitizers-cmake
+	url = git://github.com/arsenm/sanitizers-cmake.git
