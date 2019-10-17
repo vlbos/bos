@@ -178,11 +178,11 @@ public:
    fc::microseconds                 abi_serializer_max_time_ms;
    fc::optional<bfs::path>          snapshot_path;
 
-   void on_pbft_incoming_prepare(pbft_metadata_ptr<pbft_prepare> p);
-   void on_pbft_incoming_commit(pbft_metadata_ptr<pbft_commit> c);
-   void on_pbft_incoming_view_change(pbft_metadata_ptr<pbft_view_change> vc);
-   void on_pbft_incoming_new_view(pbft_metadata_ptr<pbft_new_view> nv);
-   void on_pbft_incoming_checkpoint(pbft_metadata_ptr<pbft_checkpoint> cp);
+   void on_pbft_incoming_prepare(const pbft_metadata_ptr<pbft_prepare>& p);
+   void on_pbft_incoming_commit(const pbft_metadata_ptr<pbft_commit>& c);
+   void on_pbft_incoming_view_change(const pbft_metadata_ptr<pbft_view_change>& vc);
+   void on_pbft_incoming_new_view(const pbft_metadata_ptr<pbft_new_view>& nv);
+   void on_pbft_incoming_checkpoint(const pbft_metadata_ptr<pbft_checkpoint>& cp);
 
    // retained references to channels for easy publication
    channels::pre_accepted_block::channel_type&     pre_accepted_block_channel;
@@ -740,7 +740,7 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
       ilog("include pbft controller...");
       my->pbft_ctrl.emplace(*my->chain);
 
-      // set up method providers
+       // set up method providers
       my->get_block_by_number_provider = app().get_method<methods::get_block_by_number>().register_provider(
             [this]( uint32_t block_num ) -> signed_block_ptr {
                return my->chain->fetch_block_by_number( block_num );
@@ -805,48 +805,48 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
 
 
       //pbft
-      my->pbft_incoming_prepare_subscription = my->pbft_incoming_prepare_channel.subscribe( [this]( pbft_metadata_ptr<pbft_prepare> p ){
+      my->pbft_incoming_prepare_subscription = my->pbft_incoming_prepare_channel.subscribe( [this]( const pbft_metadata_ptr<pbft_prepare>& p ){
           my->on_pbft_incoming_prepare(p);
       });
 
-      my->pbft_incoming_commit_subscription = my->pbft_incoming_commit_channel.subscribe( [this]( pbft_metadata_ptr<pbft_commit> c ){
+      my->pbft_incoming_commit_subscription = my->pbft_incoming_commit_channel.subscribe( [this]( const pbft_metadata_ptr<pbft_commit>& c ){
           my->on_pbft_incoming_commit(c);
       });
 
-      my->pbft_incoming_view_change_subscription = my->pbft_incoming_view_change_channel.subscribe( [this]( pbft_metadata_ptr<pbft_view_change> vc ){
+      my->pbft_incoming_view_change_subscription = my->pbft_incoming_view_change_channel.subscribe( [this]( const pbft_metadata_ptr<pbft_view_change>& vc ){
           my->on_pbft_incoming_view_change(vc);
       });
 
-      my->pbft_incoming_new_view_subscription = my->pbft_incoming_new_view_channel.subscribe( [this]( pbft_metadata_ptr<pbft_new_view> nv ){
+      my->pbft_incoming_new_view_subscription = my->pbft_incoming_new_view_channel.subscribe( [this]( const pbft_metadata_ptr<pbft_new_view>& nv ){
           my->on_pbft_incoming_new_view(nv);
       });
 
-      my->pbft_incoming_checkpoint_subscription = my->pbft_incoming_checkpoint_channel.subscribe( [this]( pbft_metadata_ptr<pbft_checkpoint> cp ){
+      my->pbft_incoming_checkpoint_subscription = my->pbft_incoming_checkpoint_channel.subscribe( [this]( const pbft_metadata_ptr<pbft_checkpoint>& cp ){
           my->on_pbft_incoming_checkpoint(cp);
       });
 
-      my->pbft_outgoing_prepare_connection = my->pbft_ctrl->pbft_db.pbft_outgoing_prepare.connect(
-              [this]( const pbft_prepare& prepare ) {
+      my->pbft_outgoing_prepare_connection = my->pbft_ctrl->state_machine.pbft_outgoing_prepare.connect(
+              [this]( const pbft_prepare_ptr& prepare ) {
                   my->pbft_outgoing_prepare_channel.publish( prepare );
               });
 
-      my->pbft_outgoing_commit_connection = my->pbft_ctrl->pbft_db.pbft_outgoing_commit.connect(
-              [this]( const pbft_commit& commit ) {
+      my->pbft_outgoing_commit_connection = my->pbft_ctrl->state_machine.pbft_outgoing_commit.connect(
+              [this]( const pbft_commit_ptr& commit ) {
                   my->pbft_outgoing_commit_channel.publish( commit );
               });
 
-      my->pbft_outgoing_view_change_connection = my->pbft_ctrl->pbft_db.pbft_outgoing_view_change.connect(
-              [this]( const pbft_view_change& view_change ) {
+      my->pbft_outgoing_view_change_connection = my->pbft_ctrl->state_machine.pbft_outgoing_view_change.connect(
+              [this]( const pbft_view_change_ptr& view_change ) {
                   my->pbft_outgoing_view_change_channel.publish( view_change );
               });
 
-      my->pbft_outgoing_new_view_connection = my->pbft_ctrl->pbft_db.pbft_outgoing_new_view.connect(
-              [this]( const pbft_new_view& new_view ) {
+      my->pbft_outgoing_new_view_connection = my->pbft_ctrl->state_machine.pbft_outgoing_new_view.connect(
+              [this]( const pbft_new_view_ptr& new_view ) {
                   my->pbft_outgoing_new_view_channel.publish( new_view );
               });
 
-      my->pbft_outgoing_checkpoint_connection = my->pbft_ctrl->pbft_db.pbft_outgoing_checkpoint.connect(
-              [this]( const pbft_checkpoint& checkpoint ) {
+      my->pbft_outgoing_checkpoint_connection = my->pbft_ctrl->state_machine.pbft_outgoing_checkpoint.connect(
+              [this]( const pbft_checkpoint_ptr& checkpoint ) {
                   my->pbft_outgoing_checkpoint_channel.publish( checkpoint );
               });
 
@@ -856,23 +856,23 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
 
 }
 
-void chain_plugin_impl::on_pbft_incoming_prepare(pbft_metadata_ptr<pbft_prepare> p){
+void chain_plugin_impl::on_pbft_incoming_prepare(const pbft_metadata_ptr<pbft_prepare>& p){
    pbft_ctrl->on_pbft_prepare(p);
 }
 
-void chain_plugin_impl::on_pbft_incoming_commit(pbft_metadata_ptr<pbft_commit> c){
+void chain_plugin_impl::on_pbft_incoming_commit(const pbft_metadata_ptr<pbft_commit>& c){
    pbft_ctrl->on_pbft_commit(c);
 }
 
-void chain_plugin_impl::on_pbft_incoming_view_change(pbft_metadata_ptr<pbft_view_change> vc){
+void chain_plugin_impl::on_pbft_incoming_view_change(const pbft_metadata_ptr<pbft_view_change>& vc){
    pbft_ctrl->on_pbft_view_change(vc);
 }
 
-void chain_plugin_impl::on_pbft_incoming_new_view(pbft_metadata_ptr<pbft_new_view> nv){
+void chain_plugin_impl::on_pbft_incoming_new_view(const pbft_metadata_ptr<pbft_new_view>& nv){
    pbft_ctrl->on_pbft_new_view(nv);
 }
 
-void chain_plugin_impl::on_pbft_incoming_checkpoint(pbft_metadata_ptr<pbft_checkpoint> cp){
+void chain_plugin_impl::on_pbft_incoming_checkpoint(const pbft_metadata_ptr<pbft_checkpoint>& cp){
    pbft_ctrl->on_pbft_checkpoint(cp);
 }
 
@@ -1209,8 +1209,8 @@ read_only::get_info_results read_only::get_info(const read_only::get_info_params
       db.fork_db_head_block_id(),
       db.fork_db_head_block_time(),
       db.fork_db_head_block_producer(),
-      pbft_ctrl.state_machine->get_current_view(),
-      pbft_ctrl.state_machine->get_target_view(),
+      pbft_ctrl.state_machine.get_current_view(),
+      pbft_ctrl.state_machine.get_target_view(),
       db.last_stable_checkpoint_block_num(),
       rm.get_virtual_block_cpu_limit(),
       rm.get_virtual_block_net_limit(),
