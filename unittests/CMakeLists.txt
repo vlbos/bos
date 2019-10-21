@@ -10,24 +10,15 @@ find_package(LLVM 4.0 REQUIRED CONFIG)
 
 link_directories(${LLVM_LIBRARY_DIR})
 
-set( CMAKE_CXX_STANDARD 14 )
+set( CMAKE_CXX_STANDARD 17)
 
 add_subdirectory(contracts)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/include/config.hpp ESCAPE_QUOTES)
 
 file(GLOB UNIT_TESTS "*.cpp")
-set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/externals/sanitizers-cmake/cmake" ${CMAKE_MODULE_PATH})
-set(SANITIZE_ADDRESS TRUE)
-# set(SANITIZE_MEMORY TRUE)
-# set(SANITIZE_THREAD TRUE)
-# set(SANITIZE_UNDEFINED TRUE)
 
-#-DSANITIZE_ADDRESS=On
-find_package(Sanitizers)
 add_executable( unit_test ${UNIT_TESTS} ${WASM_UNIT_TESTS} )
-add_sanitizers(unit_test)
-
 target_link_libraries( unit_test eosio_chain chainbase eosio_testing fc ${PLATFORM_SPECIFIC_LIBS} )
 
 target_include_directories( unit_test PUBLIC
