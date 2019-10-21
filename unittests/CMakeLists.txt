@@ -10,7 +10,6 @@ find_package(LLVM 4.0 REQUIRED CONFIG)
 
 link_directories(${LLVM_LIBRARY_DIR})
 
-set( CMAKE_CXX_STANDARD 17)
 
 add_subdirectory(contracts)
 
@@ -21,6 +20,7 @@ file(GLOB UNIT_TESTS "*.cpp")
 add_executable( unit_test ${UNIT_TESTS} ${WASM_UNIT_TESTS} )
 target_link_libraries( unit_test eosio_chain chainbase eosio_testing fc ${PLATFORM_SPECIFIC_LIBS} )
 
+target_compile_options(unit_test PUBLIC -DDISABLE_EOSLIB_SERIALIZE)
 target_include_directories( unit_test PUBLIC
                             ${CMAKE_SOURCE_DIR}/libraries/testing/include
                             ${CMAKE_SOURCE_DIR}/contracts

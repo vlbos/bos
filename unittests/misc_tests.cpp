@@ -553,7 +553,7 @@ BOOST_AUTO_TEST_CASE(transaction_test) { try {
    testing::TESTER test;
    signed_transaction trx;
 
-   variant pretty_trx = fc::mutable_variant_object()
+   fc::variant pretty_trx = fc::mutable_variant_object()
       ("actions", fc::variants({
          fc::mutable_variant_object()
             ("account", "eosio")

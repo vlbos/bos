@@ -47,7 +47,7 @@
 #include <eosio.bios/eosio.bios.wast.hpp>
 #include <eosio.bios/eosio.bios.abi.hpp>
 
-#define DISABLE_EOSLIB_SERIALIZE
+
 #include <test_api/test_api_common.hpp>
 
 FC_REFLECT( dummy_action, (a)(b)(c) )
