@@ -151,7 +151,7 @@ namespace eosio { namespace chain {
    {
       null_object_type = 0,
       account_object_type,
-      account_sequence_object_type,
+      account_metadata_object_type,
       permission_object_type,
       permission_usage_object_type,
       permission_link_object_type,
@@ -190,9 +190,58 @@ namespace eosio { namespace chain {
       action_history_object_type,               ///< Defined by history_plugin
       reversible_block_object_type,
       upgrade_property_object_type,
+      
       global_property3_object_type,
+	  code_object_type,
       OBJECT_TYPE_COUNT ///< Sentry value which contains the number of different object types
    };
+
+   /**
+    *  Important notes on using chainbase objects in EOSIO code:
+    *
+    *  There are several constraints that need to be followed when using chainbase objects.
+    *  Some of these constraints are due to the requirements imposed by the chainbase library,
+    *  others are due to requirements to ensure determinism in the EOSIO chain library.
+    *
+    *  Before listing the constraints, the "restricted field set" must be defined.
+    *
+    *  Every chainbase object includes a field called id which has the type id_type.
+    *  The id field is always included in the restricted field set.
+    *
+    *  A field of a chainbase object is considered to be in the restricted field set if it is involved in the
+    *  derivation of the key used for one of the indices in the chainbase multi-index unless its only involvement
+    *  is through being included in composite_keys that end with the id field.
+    *
+    *  So if the multi-index includes an index like the following
+    *  ```
+    *    ordered_unique< tag<by_sender_id>,
+    *       composite_key< generated_transaction_object,
+    *          BOOST_MULTI_INDEX_MEMBER( generated_transaction_object, account_name, sender),
+    *          BOOST_MULTI_INDEX_MEMBER( generated_transaction_object, uint128_t, sender_id)
+    *       >
+    *    >
+    *  ```
+    *  both `sender` and `sender_id` fields are part of the restricted field set.
+    *
+    *  On the other hand, an index like the following
+    *  ```
+    *    ordered_unique< tag<by_expiration>,
+    *       composite_key< generated_transaction_object,
+    *          BOOST_MULTI_INDEX_MEMBER( generated_transaction_object, time_point, expiration),
+    *          BOOST_MULTI_INDEX_MEMBER( generated_transaction_object, generated_transaction_object::id_type, id)
+    *       >
+    *    >
+    *  ```
+    *  would not by itself require the `expiration` field to be part of the restricted field set.
+    *
+    *  The restrictions on usage of the chainbase objects within this code base are:
+    *     + The chainbase object includes the id field discussed above.
+    *     + The multi-index must include an ordered_unique index tagged with by_id that is based on the id field as the sole key.
+    *     + No other types of indices other than ordered_unique are allowed.
+    *       If an index is desired that does not enforce uniqueness, then use a composite key that ends with the id field.
+    *     + When creating a chainbase object, the constructor lambda should never mutate the id field.
+    *     + When modifying a chainbase object, the modifier lambda should never mutate any fields in the restricted field set.
+    */
 
    class account_object;
    class producer_object;
@@ -219,6 +268,24 @@ namespace eosio { namespace chain {
    typedef vector<std::pair<uint16_t,vector<char>>> extensions_type;
 
 
+   template<typename E, typename F>
+   static inline auto has_field( F flags, E field )
+   -> std::enable_if_t< std::is_integral<F>::value && std::is_unsigned<F>::value &&
+                        std::is_enum<E>::value && std::is_same< F, std::underlying_type_t<E> >::value, bool>
+   {
+      return ( (flags & static_cast<F>(field)) != 0 );
+   }
+
+   template<typename E, typename F>
+   static inline auto set_field( F flags, E field, bool value = true )
+   -> std::enable_if_t< std::is_integral<F>::value && std::is_unsigned<F>::value &&
+                        std::is_enum<E>::value && std::is_same< F, std::underlying_type_t<E> >::value, F >
+   {
+      if( value )
+         return ( flags | static_cast<F>(field) );
+      else
+         return ( flags & ~static_cast<F>(field) );
+   }
 } }  // eosio::chain
 
 FC_REFLECT( eosio::chain::void_t, )

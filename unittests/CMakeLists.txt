@@ -6,11 +6,6 @@ if( GPERFTOOLS_FOUND )
     list( APPEND PLATFORM_SPECIFIC_LIBS tcmalloc )
 endif()
 
-find_package(LLVM 4.0 REQUIRED CONFIG)
-
-link_directories(${LLVM_LIBRARY_DIR})
-
-
 add_subdirectory(contracts)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/include/config.hpp ESCAPE_QUOTES)
@@ -28,17 +23,34 @@ target_include_directories( unit_test PUBLIC
                             ${CMAKE_CURRENT_SOURCE_DIR}/contracts
                             ${CMAKE_CURRENT_BINARY_DIR}/contracts
                             ${CMAKE_CURRENT_BINARY_DIR}/include )
-add_dependencies(unit_test asserter test_api test_api_mem test_api_db test_ram_limit test_api_multi_index eosio.token proxy identity identity_test stltest eosio.system eosio.token eosio.bios multi_index_test noop eosio.msig payloadless tic_tac_toe deferred_test snapshot_test)
 
-#Manually run unit_test for all supported runtimes
-#To run unit_test with all log from blockchain displayed, put --verbose after --, i.e. unit_test -- --verbose
-add_test(NAME unit_test_wavm COMMAND unit_test
- -t \!wasm_tests/weighted_cpu_limit_tests
- --report_level=detailed --color_output --catch_system_errors=no -- --wavm)
- add_test(NAME unit_test_wabt COMMAND unit_test
- -t \!wasm_tests/weighted_cpu_limit_tests
- --report_level=detailed --color_output -- --wabt)
+### MARK TEST SUITES FOR EXECUTION ###
+foreach(TEST_SUITE ${UNIT_TESTS}) # create an independent target for each test suite
+  execute_process(COMMAND bash -c "grep -E 'BOOST_AUTO_TEST_SUITE\\s*[(]' ${TEST_SUITE} | grep -vE '//.*BOOST_AUTO_TEST_SUITE\\s*[(]' | cut -d ')' -f 1 | cut -d '(' -f 2" OUTPUT_VARIABLE SUITE_NAME OUTPUT_STRIP_TRAILING_WHITESPACE) # get the test suite name from the *.cpp file
+  if (NOT "" STREQUAL "${SUITE_NAME}") # ignore empty lines
+    execute_process(COMMAND bash -c "echo ${SUITE_NAME} | sed -e 's/s$//' | sed -e 's/_test$//'" OUTPUT_VARIABLE TRIMMED_SUITE_NAME OUTPUT_STRIP_TRAILING_WHITESPACE) # trim "_test" or "_tests" from the end of ${SUITE_NAME}
+    # to run unit_test with all log from blockchain displayed, put "--verbose" after "--", i.e. "unit_test -- --verbose"
+    foreach(RUNTIME ${EOSIO_WASM_RUNTIMES})
+      add_test(NAME ${TRIMMED_SUITE_NAME}_unit_test_${RUNTIME} COMMAND unit_test --run_test=${SUITE_NAME} --report_level=detailed --color_output --catch_system_errors=no -- --${RUNTIME})
+      # build list of tests to run during coverage testing
+      if(ctest_tests)
+         string(APPEND ctest_tests "|")
+      endif()
+      string(APPEND ctest_tests ${TRIMMED_SUITE_NAME}_unit_test_$RUNTIME)
+    endforeach()
+  endif()
+endforeach(TEST_SUITE)
+set(ctest_tests "'${ctest_tests}' -j8") # surround test list string in apostrophies
 
+# The following tests are known to take the longest, bump up their cost (priority) so that they'll run first
+# even on fresh first time test runs before ctest auto-detects costs
+foreach(RUNTIME ${EOSIO_WASM_RUNTIMES})
+   set_tests_properties(api_unit_test_${RUNTIME} PROPERTIES COST 5000)
+   set_tests_properties(wasm_unit_test_${RUNTIME} PROPERTIES COST 4000)
+   set_tests_properties(delay_unit_test_${RUNTIME} PROPERTIES COST 3000)
+endforeach()
+
+### COVERAGE TESTING ###
 if(ENABLE_COVERAGE_TESTING)
 
   set(Coverage_NAME ${PROJECT_NAME}_ut_coverage)

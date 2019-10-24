@@ -6,6 +6,7 @@
 #include <eosio/chain/exceptions.hpp>
 
 #include <eosio/chain/account_object.hpp>
+#include <eosio/chain/code_object.hpp>
 #include <eosio/chain/block_summary_object.hpp>
 #include <eosio/chain/eosio_contract.hpp>
 #include <eosio/chain/global_property_object.hpp>
@@ -18,12 +19,13 @@
 #include <eosio/chain/resource_limits.hpp>
 #include <eosio/chain/chain_snapshot.hpp>
 #include <eosio/chain/thread_utils.hpp>
+#include <eosio/chain/platform_timer.hpp>
 
 #include <chainbase/chainbase.hpp>
 #include <fc/io/json.hpp>
+#include <fc/log/logger_config.hpp>
 #include <fc/scoped_exit.hpp>
 #include <fc/variant_object.hpp>
-
 
 namespace eosio { namespace chain {
 
@@ -31,7 +33,7 @@ using resource_limits::resource_limits_manager;
 
 using controller_index_set = index_set<
    account_index,
-   account_sequence_index,
+   account_metadata_index,
    global_property_multi_index,
    global_property2_multi_index,
    dynamic_global_property_multi_index,
@@ -40,7 +42,8 @@ using controller_index_set = index_set<
    block_summary_multi_index,
    transaction_multi_index,
    generated_transaction_multi_index,
-   table_id_multi_index
+   table_id_multi_index,
+   code_index
 >;
 
 using contract_database_index_set = index_set<
@@ -146,6 +149,10 @@ struct controller_impl {
    bool                           trusted_producer_light_validation = false;
    uint32_t                       snapshot_head_block = 0;
    boost::asio::thread_pool       thread_pool;
+   platform_timer                 timer;
+#if defined(EOSIO_EOS_VM_RUNTIME_ENABLED) || defined(EOSIO_EOS_VM_JIT_RUNTIME_ENABLED)
+   vm::wasm_allocator                 wasm_alloc;
+#endif
 
    typedef pair<scope_name,action_name>                   handler_key;
    map< account_name, map<handler_key, apply_handler> >   apply_handlers;
@@ -191,7 +198,7 @@ struct controller_impl {
         cfg.reversible_cache_size ),
     blog( cfg.blocks_dir ),
     fork_db( cfg.state_dir ),
-    wasmif( cfg.wasm_runtime ),
+    wasmif( cfg.wasm_runtime, cfg.eosvmoc_tierup, db, cfg.state_dir, cfg.eosvmoc_config ),
     resource_limits( db ),
     authorization( s, db ),
     conf( cfg ),
@@ -201,7 +208,8 @@ struct controller_impl {
    {
 
 #define SET_APP_HANDLER( receiver, contract, action) \
-   set_apply_handler( #receiver, #contract, #action, &BOOST_PP_CAT(apply_, BOOST_PP_CAT(contract, BOOST_PP_CAT(_,action) ) ) )
+   set_apply_handler( account_name(#receiver), account_name(#contract), action_name(#action), \
+                      &BOOST_PP_CAT(apply_, BOOST_PP_CAT(contract, BOOST_PP_CAT(_,action) ) ) )
 
    SET_APP_HANDLER( eosio, eosio, newaccount );
    SET_APP_HANDLER( eosio, eosio, setcode );
@@ -701,14 +709,14 @@ struct controller_impl {
       db.create<account_object>([&](auto& a) {
          a.name = name;
          a.creation_date = conf.genesis.initial_timestamp;
-         a.privileged = is_privileged;
 
          if( name == config::system_account_name ) {
             a.set_abi(eosio_contract_abi(abi_def()));
          }
       });
-      db.create<account_sequence_object>([&](auto & a) {
-        a.name = name;
+      db.create<account_metadata_object>([&](auto & a) {
+         a.name = name;
+         a.set_privileged( is_privileged );
       });
 
       const auto& owner_permission  = authorization.create_permission(name, config::owner_name, 0,
@@ -994,7 +1002,8 @@ struct controller_impl {
       etrx.expiration = self.pending_block_time() + fc::microseconds(999'999); // Round up to avoid appearing expired
       etrx.set_reference_block( self.head_block_id() );
 
-      transaction_context trx_context( self, etrx, etrx.id(), start );
+      transaction_checktime_timer trx_timer(timer);
+      transaction_context trx_context( self, etrx, etrx.id(), std::move(trx_timer), start );
       trx_context.deadline = deadline;
       trx_context.explicit_billed_cpu_time = explicit_billed_cpu_time;
       trx_context.billed_cpu_time_us = billed_cpu_time_us;
@@ -1003,8 +1012,7 @@ struct controller_impl {
       try {
          trx_context.init_for_implicit_trx();
          trx_context.published = gtrx.published;
-         trx_context.trace->action_traces.emplace_back();
-         trx_context.dispatch_action( trx_context.trace->action_traces.back(), etrx.actions.back(), gtrx.sender );
+         trx_context.execute_action( trx_context.schedule_action( etrx.actions.back(), gtrx.sender, false, 0, 0 ), 0 );
          trx_context.finalize(); // Automatically rounds up network and CPU usage in trace and bills payers if successful
 
          auto restore = make_block_restore_point();
@@ -1017,20 +1025,20 @@ struct controller_impl {
          return trace;
       } catch( const fc::exception& e ) {
          cpu_time_to_bill_us = trx_context.update_billed_cpu_time( fc::time_point::now() );
+         trace->error_code = controller::convert_exception_to_error_code( e );
          trace->except = e;
          trace->except_ptr = std::current_exception();
       }
       return trace;
    }
 
-   void remove_scheduled_transaction( const generated_transaction_object& gto ) {
-      resource_limits.add_pending_ram_usage(
-         gto.payer,
-         -(config::billable_size_v<generated_transaction_object> + gto.packed_trx.size())
-      );
+   int64_t remove_scheduled_transaction( const generated_transaction_object& gto ) {
+      int64_t ram_delta = -(config::billable_size_v<generated_transaction_object> + gto.packed_trx.size());
+      resource_limits.add_pending_ram_usage( gto.payer, ram_delta );
       // No need to verify_account_ram_usage since we are only reducing memory
 
       db.remove( gto );
+      return ram_delta;
    }
 
    bool failure_is_subjective( const fc::exception& e ) const {
@@ -1077,7 +1085,7 @@ struct controller_impl {
       //
       // IF the transaction FAILs in a subjective way, `undo_session` should expire without being squashed
       // resulting in the GTO being restored and available for a future block to retire.
-      remove_scheduled_transaction(gto);
+      int64_t trx_removal_ram_delta = remove_scheduled_transaction(gto);
 
       fc::datastream<const char*> ds( gtrx.packed_trx.data(), gtrx.packed_trx.size() );
 
@@ -1112,7 +1120,8 @@ struct controller_impl {
 
       uint32_t cpu_time_to_bill_us = billed_cpu_time_us;
 
-      transaction_context trx_context( self, dtrx, gtrx.trx_id );
+      transaction_checktime_timer trx_timer(timer);
+      transaction_context trx_context( self, dtrx, gtrx.trx_id, std::move(trx_timer) );
       trx_context.leeway =  fc::microseconds(0); // avoid stealing cpu resource
       trx_context.deadline = deadline;
       trx_context.explicit_billed_cpu_time = explicit_billed_cpu_time;
@@ -1123,7 +1132,13 @@ struct controller_impl {
          trx_context.init_for_deferred_trx( gtrx.published );
 
          if( trx_context.enforce_whiteblacklist && pending->_block_status == controller::block_status::incomplete ) {
-            check_actor_list( trx_context.bill_to_accounts ); // Assumes bill_to_accounts is the set of actors authorizing the transaction
+            flat_set<account_name> actors;
+            for( const auto& act : trx_context.trx.actions ) {
+               for( const auto& auth : act.authorization ) {
+                  actors.insert( auth.actor );
+               }
+            }
+            check_actor_list( actors );
          }
 
          trx_context.exec();
@@ -1261,7 +1276,8 @@ struct controller_impl {
          }
 
          const signed_transaction& trn = trx->packed_trx->get_signed_transaction();
-         transaction_context trx_context(self, trn, trx->id, start);
+         transaction_checktime_timer trx_timer(timer);
+         transaction_context trx_context(self, trn, trx->id(), std::move(trx_timer), start);
          if ((bool)subjective_cpu_leeway && pending->_block_status == controller::block_status::incomplete) {
             trx_context.leeway = *subjective_cpu_leeway;
          }
@@ -2680,6 +2696,20 @@ void controller::set_subjective_cpu_leeway(fc::microseconds leeway) {
    my->subjective_cpu_leeway = leeway;
 }
 
+void controller::set_greylist_limit( uint32_t limit ) {
+   EOS_ASSERT( 0 < limit && limit <= chain::config::maximum_elastic_resource_multiplier,
+               misc_exception,
+               "Invalid limit (${limit}) passed into set_greylist_limit. "
+               "Must be between 1 and ${max}.",
+               ("limit", limit)("max", chain::config::maximum_elastic_resource_multiplier)
+   );
+   my->conf.greylist_limit = limit;
+}
+
+uint32_t controller::get_greylist_limit()const {
+   return my->conf.greylist_limit;
+}
+
 void controller::add_resource_greylist(const account_name &name) {
    my->conf.resource_greylist.insert(name);
 }
@@ -2697,6 +2727,21 @@ const flat_set<account_name> &controller::get_resource_greylist() const {
    return  my->conf.resource_greylist;
 }
 
+#if defined(EOSIO_EOS_VM_RUNTIME_ENABLED) || defined(EOSIO_EOS_VM_JIT_RUNTIME_ENABLED)
+vm::wasm_allocator& controller::get_wasm_allocator() {
+   return my->wasm_alloc;
+}
+#endif
+
+fc::optional<uint64_t> controller::convert_exception_to_error_code( const fc::exception& e ) {
+   const chain_exception* e_ptr = dynamic_cast<const chain_exception*>( &e );
+
+   if( e_ptr == nullptr ) return {};
+
+   if( !e_ptr->error_code ) return static_cast<uint64_t>(system_error_code::generic_system_error);
+
+   return e_ptr->error_code;
+}
 // *bos begin*
 const global_property2_object& controller::get_global_properties2()const {
    return my->db.get<global_property2_object>();
