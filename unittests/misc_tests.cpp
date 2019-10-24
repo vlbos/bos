@@ -65,7 +65,7 @@ BOOST_AUTO_TEST_SUITE(misc_tests)
 
 BOOST_AUTO_TEST_CASE(name_suffix_tests)
 {
-   BOOST_CHECK_EQUAL( name{name_suffix(0)}, name{0} );
+   BOOST_CHECK_EQUAL( name{name_suffix(name(0))}, name{0} );
    BOOST_CHECK_EQUAL( name{name_suffix(N(abcdehijklmn))}, name{N(abcdehijklmn)} );
    BOOST_CHECK_EQUAL( name{name_suffix(N(abcdehijklmn1))}, name{N(abcdehijklmn1)} );
    BOOST_CHECK_EQUAL( name{name_suffix(N(abc.def))}, name{N(def)} );
