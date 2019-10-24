@@ -1,20 +1,24 @@
-#include <boost/test/unit_test.hpp>
-#include <eosio/testing/tester.hpp>
 #include <eosio/chain/abi_serializer.hpp>
-#include <eosio/chain/fork_database.hpp>
+#include <eosio/chain/abi_serializer.hpp>
+#include <eosio/testing/tester.hpp>
 
-#include <eosio.token/eosio.token.wast.hpp>
-#include <eosio.token/eosio.token.abi.hpp>
+#include <eosio/chain/fork_database.hpp>
 
 #include <Runtime/Runtime.h>
 
 #include <fc/variant_object.hpp>
 
+#include <boost/test/unit_test.hpp>
+
+#include <contracts.hpp>
+
+
+
 using namespace eosio::chain;
 using namespace eosio::testing;
 
 private_key_type get_private_key( name keyname, string role ) {
-   return private_key_type::regenerate<fc::ecc::private_key_shim>(fc::sha256::hash(string(keyname)+role));
+   return private_key_type::regenerate<fc::ecc::private_key_shim>(fc::sha256::hash(keyname.to_string()+role));
 }
 
 public_key_type  get_public_key( name keyname, string role ){
@@ -35,15 +39,11 @@ BOOST_AUTO_TEST_CASE( irrblock ) try {
    c.produce_blocks(10);
    auto r = c.create_accounts( {N(dan),N(sam),N(pam),N(scott)} );
    auto res = c.set_producers( {N(dan),N(sam),N(pam),N(scott)} );
-   vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
-                                {N(sam),get_public_key(N(sam), "active")},
-                                {N(scott),get_public_key(N(scott), "active")},
-                                {N(pam),get_public_key(N(pam), "active")}
-                              };
+
    wlog("set producer schedule to [dan,sam,pam]");
    c.produce_blocks(50);
 
-} FC_LOG_AND_RETHROW() 
+} FC_LOG_AND_RETHROW()
 
 struct fork_tracker {
    vector<signed_block_ptr> blocks;
@@ -119,7 +119,7 @@ BOOST_AUTO_TEST_CASE( fork_with_bad_block ) try {
       BOOST_TEST_CONTEXT("Testing Fork: " << i) {
          const auto& fork = forks.at(i);
          // push the fork to the original node
-         for (int fidx = 0; fidx < fork.blocks.size() - 1; fidx++) {
+         for (size_t fidx = 0; fidx < fork.blocks.size() - 1; fidx++) {
             const auto& b = fork.blocks.at(fidx);
             // push the block only if its not known already
             if (!bios.control->fetch_block_by_id(b->id())) {
@@ -128,7 +128,9 @@ BOOST_AUTO_TEST_CASE( fork_with_bad_block ) try {
          }
 
          // push the block which should attempt the corrupted fork and fail
-         BOOST_REQUIRE_THROW(bios.push_block(fork.blocks.back()), fc::exception);
+         BOOST_REQUIRE_EXCEPTION( bios.push_block(fork.blocks.back()), fc::exception,
+                                  fc_exception_message_is( "Block ID does not match" )
+         );
       }
    }
 
@@ -143,23 +145,22 @@ BOOST_AUTO_TEST_CASE( fork_with_bad_block ) try {
 
 BOOST_AUTO_TEST_CASE( forking ) try {
    tester c;
-   c.produce_block();
-   c.produce_block();
+   while (c.control->head_block_num() < 3) {
+      c.produce_block();
+   }
    auto r = c.create_accounts( {N(dan),N(sam),N(pam)} );
    wdump((fc::json::to_pretty_string(r)));
    c.produce_block();
    auto res = c.set_producers( {N(dan),N(sam),N(pam)} );
-   vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
-                                {N(sam),get_public_key(N(sam), "active")},
-                                {N(pam),get_public_key(N(pam), "active")}};
+
    wdump((fc::json::to_pretty_string(res)));
    wlog("set producer schedule to [dan,sam,pam]");
    c.produce_blocks(30);
 
    auto r2 = c.create_accounts( {N(eosio.token)} );
    wdump((fc::json::to_pretty_string(r2)));
-   c.set_code( N(eosio.token), eosio_token_wast );
-   c.set_abi( N(eosio.token), eosio_token_abi );
+   c.set_code( N(eosio.token), contracts::eosio_token_wasm() );
+   c.set_abi( N(eosio.token), contracts::eosio_token_abi().data() );
    c.produce_blocks(10);
 
 
@@ -168,15 +169,19 @@ BOOST_AUTO_TEST_CASE( forking ) try {
               ("maximum_supply", core_from_string("10000000.0000"))
       );
 
-   wdump((fc::json::to_pretty_string(cr)));
-
    cr = c.push_action( N(eosio.token), N(issue), config::system_account_name, mutable_variant_object()
+              ("to",       "eosio" )
+              ("quantity", core_from_string("100.0000"))
+              ("memo", "")
+      );
+
+   cr = c.push_action( N(eosio.token), N(transfer), config::system_account_name, mutable_variant_object()
+              ("from",     "eosio")
               ("to",       "dan" )
               ("quantity", core_from_string("100.0000"))
               ("memo", "")
       );
 
-   wdump((fc::json::to_pretty_string(cr)));
 
 
    tester c2;
@@ -294,7 +299,9 @@ BOOST_AUTO_TEST_CASE( forking ) try {
  */
 BOOST_AUTO_TEST_CASE( prune_remove_branch ) try {
    tester c;
-   c.produce_blocks(10);
+   while (c.control->head_block_num() < 11) {
+      c.produce_block();
+   }
    auto r = c.create_accounts( {N(dan),N(sam),N(pam),N(scott)} );
    auto res = c.set_producers( {N(dan),N(sam),N(pam),N(scott)} );
    wlog("set producer schedule to [dan,sam,pam,scott]");
@@ -305,15 +312,15 @@ BOOST_AUTO_TEST_CASE( prune_remove_branch ) try {
    push_blocks(c, c2);
 
    // fork happen after block 61
-   BOOST_REQUIRE_EQUAL(61, c.control->head_block_num());
-   BOOST_REQUIRE_EQUAL(61, c2.control->head_block_num());
+   BOOST_REQUIRE_EQUAL(61u, c.control->head_block_num());
+   BOOST_REQUIRE_EQUAL(61u, c2.control->head_block_num());
 
-   int fork_num = c.control->head_block_num();
+   uint32_t fork_num = c.control->head_block_num();
 
    auto nextproducer = [](tester &c, int skip_interval) ->account_name {
       auto head_time = c.control->head_block_time();
       auto next_time = head_time + fc::milliseconds(config::block_interval_ms * skip_interval);
-      return c.control->head_block_state()->get_scheduled_producer(next_time).producer_name;   
+      return c.control->head_block_state()->get_scheduled_producer(next_time).producer_name;
    };
 
    // fork c: 2 producers: dan, sam
@@ -323,28 +330,29 @@ BOOST_AUTO_TEST_CASE( prune_remove_branch ) try {
       account_name next1 = nextproducer(c, skip1);
       if (next1 == N(dan) || next1 == N(sam)) {
          c.produce_block(fc::milliseconds(config::block_interval_ms * skip1)); skip1 = 1;
-      } 
+      }
       else ++skip1;
       account_name next2 = nextproducer(c2, skip2);
       if (next2 == N(scott)) {
          c2.produce_block(fc::milliseconds(config::block_interval_ms * skip2)); skip2 = 1;
-      } 
+      }
       else ++skip2;
    }
 
-   BOOST_REQUIRE_EQUAL(87, c.control->head_block_num());
-   BOOST_REQUIRE_EQUAL(73, c2.control->head_block_num());
-   
+   BOOST_REQUIRE_EQUAL(87u, c.control->head_block_num());
+   BOOST_REQUIRE_EQUAL(73u, c2.control->head_block_num());
+
    // push fork from c2 => c
-   int p = fork_num;
+   size_t p = fork_num;
+
    while ( p < c2.control->head_block_num()) {
       auto fb = c2.control->fetch_block_by_number(++p);
       c.push_block(fb);
    }
 
-   BOOST_REQUIRE_EQUAL(73, c.control->head_block_num());
+   BOOST_REQUIRE_EQUAL(73u, c.control->head_block_num());
 
-} FC_LOG_AND_RETHROW() 
+} FC_LOG_AND_RETHROW()
 
 
 BOOST_AUTO_TEST_CASE( read_modes ) try {

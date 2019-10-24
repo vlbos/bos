@@ -64,7 +64,7 @@ try
       process_block_usage(idx);
    }
 
-   auto arl = get_account_cpu_limit_ex(account, true);
+   auto [arl, greylisted] = get_account_cpu_limit_ex(account, true);
 
    BOOST_TEST(arl.available >= 9997);
    //consider  testcase  run result depend on cpu of machine  and guaranteed minimum resource ,so comment out 
@@ -94,7 +94,7 @@ try
       process_block_usage(idx);
    }
 
-   auto arl = get_account_cpu_limit_ex(account, true);
+   auto [arl, greylisted]= get_account_cpu_limit_ex(account, true);
    BOOST_TEST(arl.available >= 9997);
 
    //  BOOST_REQUIRE_THROW(add_transaction_usage({account}, increment, 0, 0), block_resource_exhausted);
@@ -122,7 +122,7 @@ try
       process_block_usage(idx);
    }
 
-   auto arl = get_account_net_limit_ex(account, true);
+   auto [arl, greylisted]= get_account_net_limit_ex(account, true);
    BOOST_TEST(arl.available >= 1238);
 
    // BOOST_REQUIRE_THROW(add_transaction_usage({account},  0,increment, 0), block_resource_exhausted);
@@ -155,7 +155,7 @@ try
       process_block_usage(idx);
    }
 
-   auto arl = get_account_net_limit_ex(account, true);
+   auto [arl, greylisted] = get_account_net_limit_ex(account, true);
    BOOST_TEST(arl.available >= 0);
 
    int64_t ram_bytes;
@@ -203,7 +203,7 @@ try
       process_block_usage(idx);
    }
 
-   auto arl = get_account_net_limit_ex(account, true);
+   auto [arl, greylisted] = get_account_net_limit_ex(account, true);
    BOOST_TEST(arl.available > 0);
 
    int64_t ram_bytes;
