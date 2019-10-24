@@ -1025,7 +1025,7 @@ struct controller_impl {
          return trace;
       } catch( const fc::exception& e ) {
          cpu_time_to_bill_us = trx_context.update_billed_cpu_time( fc::time_point::now() );
-         trace->error_code = controller::convert_exception_to_error_code( e );
+         // trace->error_code = controller::convert_exception_to_error_code( e );
          trace->except = e;
          trace->except_ptr = std::current_exception();
       }
@@ -1277,7 +1277,7 @@ struct controller_impl {
 
          const signed_transaction& trn = trx->packed_trx->get_signed_transaction();
          transaction_checktime_timer trx_timer(timer);
-         transaction_context trx_context(self, trn, trx->id(), std::move(trx_timer), start);
+         transaction_context trx_context(self, trn, trx->id, std::move(trx_timer), start);
          if ((bool)subjective_cpu_leeway && pending->_block_status == controller::block_status::incomplete) {
             trx_context.leeway = *subjective_cpu_leeway;
          }

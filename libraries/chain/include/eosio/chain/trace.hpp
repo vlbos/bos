@@ -59,7 +59,6 @@ namespace eosio { namespace chain {
 
       transaction_trace_ptr                      failed_dtrx_trace;
       fc::optional<fc::exception>                except;
-      fc::optional<uint64_t>                     error_code;
       std::exception_ptr                         except_ptr;
    };
 

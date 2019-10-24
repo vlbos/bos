@@ -107,6 +107,7 @@ namespace eosio { namespace chain {
 
             flat_set<account_name>   resource_greylist;
             flat_set<account_name>   trusted_producers;
+            uint32_t                 greylist_limit         = chain::config::maximum_elastic_resource_multiplier;
 
 
              std::map<chain::public_key_type, signature_provider_type> my_signature_providers;

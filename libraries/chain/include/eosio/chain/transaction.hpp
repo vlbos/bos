@@ -102,8 +102,8 @@ namespace eosio { namespace chain {
                                                     bool allow_duplicate_keys = false )const;
    };
 
-   struct packed_transaction : fc::reflect_init {
-      enum class compression_type {
+   struct packed_transaction {
+      enum compression_type {
          none = 0,
          zlib = 1,
       };
@@ -114,15 +114,15 @@ namespace eosio { namespace chain {
       packed_transaction& operator=(const packed_transaction&) = delete;
       packed_transaction& operator=(packed_transaction&&) = default;
 
-      explicit packed_transaction(const signed_transaction& t, compression_type _compression = compression_type::none)
-      :signatures(t.signatures), compression(_compression), unpacked_trx(t), trx_id(unpacked_trx.id())
+      explicit packed_transaction(const signed_transaction& t, compression_type _compression = none)
+      :signatures(t.signatures), compression(_compression), unpacked_trx(t)
       {
          local_pack_transaction();
          local_pack_context_free_data();
       }
 
-      explicit packed_transaction(signed_transaction&& t, compression_type _compression = compression_type::none)
-      :signatures(t.signatures), compression(_compression), unpacked_trx(std::move(t)), trx_id(unpacked_trx.id())
+      explicit packed_transaction(signed_transaction&& t, compression_type _compression = none)
+      :signatures(t.signatures), compression(_compression), unpacked_trx(std::move(t))
       {
          local_pack_transaction();
          local_pack_context_free_data();
@@ -138,7 +138,7 @@ namespace eosio { namespace chain {
 
       digest_type packed_digest()const;
 
-      const transaction_id_type& id()const { return trx_id; }
+      transaction_id_type id()const { return unpacked_trx.id(); }
       bytes               get_raw_transaction()const;
 
       time_point_sec                expiration()const { return unpacked_trx.expiration; }
@@ -158,7 +158,6 @@ namespace eosio { namespace chain {
 
       friend struct fc::reflector<packed_transaction>;
       friend struct fc::reflector_init_visitor<packed_transaction>;
-      friend struct fc::has_reflector_init<packed_transaction>;
       void reflector_init();
    private:
       vector<signature_type>                  signatures;
@@ -169,7 +168,6 @@ namespace eosio { namespace chain {
    private:
       // cache unpacked trx, for thread safety do not modify after construction
       signed_transaction                      unpacked_trx;
-      transaction_id_type                     trx_id;
    };
 
    using packed_transaction_ptr = std::shared_ptr<packed_transaction>;
