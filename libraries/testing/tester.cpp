@@ -5,9 +5,12 @@
 #include <eosio/chain/eosio_contract.hpp>
 #include <eosio/chain/generated_transaction_object.hpp>
 
-#include <eosio.bios/eosio.bios.wast.hpp>
-#include <eosio.bios/eosio.bios.abi.hpp>
+
 #include <fstream>
+
+#include <contracts.hpp>
+
+
 
 eosio::chain::asset core_from_string(const std::string& s) {
   return eosio::chain::asset::from_string(s + " " CORE_SYMBOL_NAME);
@@ -376,12 +379,12 @@ namespace eosio { namespace testing {
    typename base_tester::action_result base_tester::push_action(action&& act, uint64_t authorizer) {
       signed_transaction trx;
       if (authorizer) {
-         act.authorization = vector<permission_level>{{authorizer, config::active_name}};
+         act.authorization = vector<permission_level>{{account_name(authorizer), config::active_name}};
       }
       trx.actions.emplace_back(std::move(act));
       set_transaction_headers(trx);
       if (authorizer) {
-         trx.sign(get_private_key(authorizer, "active"), control->get_chain_id());
+         trx.sign(get_private_key(account_name(authorizer), "active"), control->get_chain_id());
       }
       try {
          push_transaction(trx);
@@ -749,7 +752,7 @@ namespace eosio { namespace testing {
    }
 
 
-   vector<char> base_tester::get_row_by_account( uint64_t code, uint64_t scope, uint64_t table, const account_name& act ) const {
+   vector<char> base_tester::get_row_by_account( name code, name scope, name table, const account_name& act ) const {
       vector<char> data;
       const auto& db = control->db();
       const auto* t_id = db.find<chain::table_id_object, chain::by_code_scope_table>( boost::make_tuple( code, scope, table ) );
@@ -760,8 +763,8 @@ namespace eosio { namespace testing {
 
       const auto& idx = db.get_index<chain::key_value_index, chain::by_scope_primary>();
 
-      auto itr = idx.lower_bound( boost::make_tuple( t_id->id, act ) );
-      if ( itr == idx.end() || itr->t_id != t_id->id || act.value != itr->primary_key ) {
+      auto itr = idx.lower_bound( boost::make_tuple( t_id->id, act.to_uint64_t() ) );
+      if ( itr == idx.end() || itr->t_id != t_id->id || act.to_uint64_t() != itr->primary_key ) {
          return data;
       }
 
@@ -826,9 +829,9 @@ namespace eosio { namespace testing {
    }
 
    void base_tester::push_genesis_block() {
-      set_code(config::system_account_name, eosio_bios_wast);
-
-      set_abi(config::system_account_name, eosio_bios_abi);
+  
+      set_code(config::system_account_name, contracts::eosio_bios_wasm());
+      set_abi(config::system_account_name, contracts::eosio_bios_abi().data());
       //produce_block();
    }
 

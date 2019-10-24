@@ -7,8 +7,9 @@ if( GPERFTOOLS_FOUND )
 endif()
 
 add_subdirectory(contracts)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/contracts.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/include/contracts.hpp ESCAPE_QUOTES)
 
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/config.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/include/config.hpp ESCAPE_QUOTES)
+
 
 file(GLOB UNIT_TESTS "*.cpp")
 
