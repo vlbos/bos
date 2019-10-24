@@ -9,7 +9,8 @@ endif()
 add_subdirectory(contracts)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/contracts.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/include/contracts.hpp ESCAPE_QUOTES)
 
-
+add_subdirectory(snapshots)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/snapshots.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/include/snapshots.hpp ESCAPE_QUOTES)
 
 file(GLOB UNIT_TESTS "*.cpp")
 

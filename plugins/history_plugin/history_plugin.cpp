@@ -148,14 +148,14 @@ namespace eosio {
             if (bypass_filter) {
               pass_on = true;
             }
-            if (filter_on.find({ act.receipt.receiver, 0, 0 }) != filter_on.end()) {
+            if (filter_on.find({ act.receipt.receiver, {}, {} }) != filter_on.end()) {
               pass_on = true;
             }
-            if (filter_on.find({ act.receipt.receiver, act.act.name, 0 }) != filter_on.end()) {
+            if (filter_on.find({ act.receipt.receiver, act.act.name, {} }) != filter_on.end()) {
               pass_on = true;
             }
             for (const auto& a : act.act.authorization) {
-              if (filter_on.find({ act.receipt.receiver, 0, a.actor }) != filter_on.end()) {
+              if (filter_on.find({ act.receipt.receiver, {}, a.actor }) != filter_on.end()) {
                 pass_on = true;
               }
               if (filter_on.find({ act.receipt.receiver, act.act.name, a.actor }) != filter_on.end()) {
@@ -165,14 +165,14 @@ namespace eosio {
 
             if (!pass_on) {  return false;  }
 
-            if (filter_out.find({ act.receipt.receiver, 0, 0 }) != filter_out.end()) {
+            if (filter_out.find({ act.receipt.receiver, {}, {} }) != filter_out.end()) {
               return false;
             }
-            if (filter_out.find({ act.receipt.receiver, act.act.name, 0 }) != filter_out.end()) {
+            if (filter_out.find({ act.receipt.receiver, act.act.name, {} }) != filter_out.end()) {
               return false;
             }
             for (const auto& a : act.act.authorization) {
-              if (filter_out.find({ act.receipt.receiver, 0, a.actor }) != filter_out.end()) {
+              if (filter_out.find({ act.receipt.receiver, {}, a.actor }) != filter_out.end()) {
                 return false;
               }
               if (filter_out.find({ act.receipt.receiver, act.act.name, a.actor }) != filter_out.end()) {
@@ -189,13 +189,13 @@ namespace eosio {
             result.insert( act.receipt.receiver );
             for( const auto& a : act.act.authorization ) {
                if( bypass_filter ||
-                   filter_on.find({ act.receipt.receiver, 0, 0}) != filter_on.end() ||
-                   filter_on.find({ act.receipt.receiver, 0, a.actor}) != filter_on.end() ||
-                   filter_on.find({ act.receipt.receiver, act.act.name, 0}) != filter_on.end() ||
+                   filter_on.find({ act.receipt.receiver, {}, {}}) != filter_on.end() ||
+                   filter_on.find({ act.receipt.receiver, {}, a.actor}) != filter_on.end() ||
+                   filter_on.find({ act.receipt.receiver, act.act.name, {}}) != filter_on.end() ||
                    filter_on.find({ act.receipt.receiver, act.act.name, a.actor }) != filter_on.end() ) {
-                 if ((filter_out.find({ act.receipt.receiver, 0, 0 }) == filter_out.end()) &&
-                     (filter_out.find({ act.receipt.receiver, 0, a.actor }) == filter_out.end()) &&
-                     (filter_out.find({ act.receipt.receiver, act.act.name, 0 }) == filter_out.end()) &&
+                 if ((filter_out.find({ act.receipt.receiver,{}, {} }) == filter_out.end()) &&
+                     (filter_out.find({ act.receipt.receiver, {}, a.actor }) == filter_out.end()) &&
+                     (filter_out.find({ act.receipt.receiver, act.act.name, {} }) == filter_out.end()) &&
                      (filter_out.find({ act.receipt.receiver, act.act.name, a.actor }) == filter_out.end())) {
                    result.insert( a.actor );
                  }
@@ -204,25 +204,23 @@ namespace eosio {
             return result;
          }
 
-         void record_account_action( account_name n, const base_action_trace& act ) {
+         void record_account_action( account_name n, const action_trace& act ) {
             auto& chain = chain_plug->chain();
             chainbase::database& db = const_cast<chainbase::database&>( chain.db() ); // Override read-only access to state DB (highly unrecommended practice!)
 
             const auto& idx = db.get_index<account_history_index, by_account_action_seq>();
-            auto itr = idx.lower_bound( boost::make_tuple( name(n.value+1), 0 ) );
+            auto itr = idx.lower_bound( boost::make_tuple( name(n.to_uint64_t()+1), 0 ) );
 
             uint64_t asn = 0;
             if( itr != idx.begin() ) --itr;
             if( itr->account == n )
                asn = itr->account_sequence_num + 1;
 
-            //idump((n)(act.receipt.global_sequence)(asn));
             const auto& a = db.create<account_history_object>( [&]( auto& aho ) {
               aho.account = n;
               aho.action_sequence_num = act.receipt.global_sequence;
               aho.account_sequence_num = asn;
             });
-            //idump((a.account)(a.action_sequence_num)(a.action_sequence_num));
          }
 
          void on_system_action( const action_trace& at ) {
@@ -324,8 +322,8 @@ namespace eosio {
                std::vector<std::string> v;
                boost::split( v, s, boost::is_any_of( ":" ));
                EOS_ASSERT( v.size() == 3, fc::invalid_arg_exception, "Invalid value ${s} for --filter-on", ("s", s));
-               filter_entry fe{v[0], v[1], v[2]};
-               EOS_ASSERT( fe.receiver.value, fc::invalid_arg_exception,
+               filter_entry fe{eosio::chain::name(v[0]), eosio::chain::name(v[1]), eosio::chain::name(v[2])};
+               EOS_ASSERT( fe.receiver.to_uint64_t(), fc::invalid_arg_exception,
                            "Invalid value ${s} for --filter-on", ("s", s));
                my->filter_on.insert( fe );
             }
@@ -336,8 +334,8 @@ namespace eosio {
                std::vector<std::string> v;
                boost::split( v, s, boost::is_any_of( ":" ));
                EOS_ASSERT( v.size() == 3, fc::invalid_arg_exception, "Invalid value ${s} for --filter-out", ("s", s));
-               filter_entry fe{v[0], v[1], v[2]};
-               EOS_ASSERT( fe.receiver.value, fc::invalid_arg_exception,
+               filter_entry fe{eosio::chain::name(v[0]), eosio::chain::name(v[1]), eosio::chain::name(v[2])};
+               EOS_ASSERT( fe.receiver.to_uint64_t(), fc::invalid_arg_exception,
                            "Invalid value ${s} for --filter-out", ("s", s));
                my->filter_out.insert( fe );
             }
@@ -348,7 +346,7 @@ namespace eosio {
          auto& chain = my->chain_plug->chain();
 
          chainbase::database& db = const_cast<chainbase::database&>( chain.db() ); // Override read-only access to state DB (highly unrecommended practice!)
-         // TODO: Use separate chainbase database for managing the state of the history_plugin (or remove deprecated history_plugin entirely) 
+         // TODO: Use separate chainbase database for managing the state of the history_plugin (or remove deprecated history_plugin entirely)
          db.add_index<account_history_index>();
          db.add_index<action_history_index>();
          db.add_index<account_control_history_multi_index>();
@@ -388,7 +386,7 @@ namespace eosio {
         auto n = params.account_name;
         idump((pos));
         if( pos == -1 ) {
-            auto itr = idx.lower_bound( boost::make_tuple( name(n.value+1), 0 ) );
+            auto itr = idx.lower_bound( boost::make_tuple( name(n.to_uint64_t()+1), 0 ) );
             if( itr == idx.begin() ) {
                if( itr->account == n )
                   pos = itr->account_sequence_num+1;
