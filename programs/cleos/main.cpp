@@ -578,7 +578,7 @@ chain::action create_open(const string& contract, const name& owner, symbol sym,
       ("ram_payer", ram_payer);
     return action {
       get_account_permissions(tx_permission, {ram_payer,config::active_name}),
-      contract, "open", variant_to_bin( name(contract), N(open), open_ )
+      name(contract), "open", variant_to_bin( name(contract), N(open), open_ )
    };
 }
 
@@ -592,7 +592,7 @@ chain::action create_transfer(const string& contract, const name& sender, const 
 
    return action {
       get_account_permissions(tx_permission, {sender,config::active_name}),
-      contract, "transfer", variant_to_bin( name(contract), N(transfer), transfer )
+      name(contract), "transfer", variant_to_bin( name(contract), N(transfer), transfer )
    };
 }
 
@@ -994,7 +994,7 @@ struct register_producer_subcommand {
             producer_key = public_key_type(producer_key_str);
          } EOS_RETHROW_EXCEPTIONS(public_key_type_exception, "Invalid producer public key: ${public_key}", ("public_key", producer_key_str))
 
-         auto regprod_var = regproducer_variant((name(producer_str), producer_key, url, loc );
+         auto regprod_var = regproducer_variant(name(producer_str), producer_key, url, loc );
          auto accountPermissions = get_account_permissions(tx_permission, {name(producer_str),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(regproducer), regprod_var)});
       });
@@ -1057,11 +1057,11 @@ struct create_account_subcommand {
                EOSC_ASSERT( buy_ram_eos.size() || buy_ram_bytes_in_kbytes || buy_ram_bytes, "ERROR: One of --buy-ram, --buy-ram-kbytes or --buy-ram-bytes should have non-zero value" );
                EOSC_ASSERT( !buy_ram_bytes_in_kbytes || !buy_ram_bytes, "ERROR: --buy-ram-kbytes and --buy-ram-bytes cannot be set at the same time" );
                action buyram = !buy_ram_eos.empty() ? create_buyram(name(creator), account_name, to_asset(buy_ram_eos))
-                  : create_buyrambytes(name(creator), account_name, (buy_ram_bytes_in_kbytes) ? (buy_ram_bytes_in_kbytes * 1024) : buy_ram_bytes);
+                  : create_buyrambytes(name(creator), name(account_name), (buy_ram_bytes_in_kbytes) ? (buy_ram_bytes_in_kbytes * 1024) : buy_ram_bytes);
                auto net = to_asset(stake_net);
                auto cpu = to_asset(stake_cpu);
                if ( net.get_amount() != 0 || cpu.get_amount() != 0 ) {
-                  action delegate = create_delegate( name(creator), account_name, net, cpu, transfer);
+                  action delegate = create_delegate( name(creator), name(account_name), net, cpu, transfer);
                   send_actions( { create, buyram, delegate } );
                } else {
                   send_actions( { create, buyram } );
@@ -2067,7 +2067,7 @@ void get_account( const string& accountName, const string& coresym, bool json_fo
             sep = ", ";
          }
          for ( auto& acc : p.required_auth.accounts ) {
-            std::cout << sep << acc.weight << ' ' << string(acc.permission.actor) << '@' << string(acc.permission.permission);
+            std::cout << sep << acc.weight << ' ' << acc.permission.actor.to_string() << '@' << acc.permission.permission.to_strig();
             sep = ", ";
          }
          std::cout << std::endl;
@@ -2430,7 +2430,7 @@ int main( int argc, char** argv ) {
       try {
          unpacked_action_data_json = json_from_file_or_string(unpacked_action_data_string);
       } EOS_RETHROW_EXCEPTIONS(transaction_type_exception, "Fail to parse unpacked action data JSON")
-      bytes packed_action_data_string = variant_to_bin(unpacked_action_data_account_string, unpacked_action_data_name_string, unpacked_action_data_json);
+      bytes packed_action_data_string = variant_to_bin(name(unpacked_action_data_account_string), name(unpacked_action_data_name_string), unpacked_action_data_json);
       std::cout << fc::to_hex(packed_action_data_string.data(), packed_action_data_string.size()) << std::endl;
    });
 
@@ -2446,7 +2446,7 @@ int main( int argc, char** argv ) {
       EOS_ASSERT( packed_action_data_string.size() >= 2, transaction_type_exception, "No packed_action_data found" );
       vector<char> packed_action_data_blob(packed_action_data_string.size()/2);
       fc::from_hex(packed_action_data_string, packed_action_data_blob.data(), packed_action_data_blob.size());
-      fc::variant unpacked_action_data_json = bin_to_variant(packed_action_data_account_string, packed_action_data_name_string, packed_action_data_blob);
+      fc::variant unpacked_action_data_json = bin_to_variant(name(packed_action_data_account_string), name(packed_action_data_name_string), packed_action_data_blob);
       std::cout << fc::json::to_pretty_string(unpacked_action_data_json) << std::endl;
    });
 
@@ -2953,7 +2953,7 @@ int main( int argc, char** argv ) {
       }
 
       if (!duplicate) {
-         actions.emplace_back( create_setcode(account, code_bytes ) );
+         actions.emplace_back( create_setcode(name(account), code_bytes ) );
          if ( shouldSend ) {
             std::cerr << localized("Setting Code...") << std::endl;
             send_actions(std::move(actions), 10000, packed_transaction::zlib);
@@ -3000,7 +3000,7 @@ int main( int argc, char** argv ) {
 
       if (!duplicate) {
          try {
-            actions.emplace_back( create_setabi(account, abi_bytes) );
+            actions.emplace_back( create_setabi(name(account), abi_bytes) );
          } EOS_RETHROW_EXCEPTIONS(abi_type_exception,  "Fail to parse ABI JSON")
          if ( shouldSend ) {
             std::cerr << localized("Setting ABI...") << std::endl;
@@ -3067,7 +3067,7 @@ int main( int argc, char** argv ) {
          tx_force_unique = false;
       }
 
-      auto transfer_amount = to_asset(con, amount);
+      auto transfer_amount = to_asset(name(con), amount);
       auto transfer = create_transfer(con, sender, recipient, transfer_amount, memo);
       if (!pay_ram) {
          send_actions( { transfer });
@@ -3339,7 +3339,7 @@ int main( int argc, char** argv ) {
       }
       auto accountPermissions = get_account_permissions(tx_permission);
 
-      send_actions({chain::action{accountPermissions, contract_account, action, variant_to_bin( contract_account, action, action_args_var ) }});
+      send_actions({chain::action{accountPermissions, contract_account, action, variant_to_bin( name(contract_account), action, action_args_var ) }});
    });
 
    // push transaction
@@ -3468,7 +3468,7 @@ int main( int argc, char** argv ) {
          ("requested", requested_perm_var)
          ("trx", trx_var);
 
-      send_actions({chain::action{accountPermissions, "eosio.msig", "propose", variant_to_bin( N(eosio.msig), N(propose), args ) }});
+      send_actions({chain::action{accountPermissions, name("eosio.msig"), name("propose"), variant_to_bin( N(eosio.msig), N(propose), args ) }});
    });
 
    //multisig propose transaction
@@ -3493,7 +3493,7 @@ int main( int argc, char** argv ) {
       auto accountPermissions = get_account_permissions(tx_permission);
       if (accountPermissions.empty()) {
          if (!proposer.empty()) {
-            accountPermissions = vector<permission_level>{{proposer, config::active_name}};
+            accountPermissions = vector<permission_level>{{name(proposer), config::active_name}};
          } else {
             EOS_THROW(missing_auth_exception, "Authority is not provided (either by multisig parameter <proposer> or -p)");
          }
