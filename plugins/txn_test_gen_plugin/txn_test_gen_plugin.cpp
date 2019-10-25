@@ -279,7 +279,7 @@ struct txn_test_gen_plugin_impl {
               ("stake_net_quantity", net.to_string())
               ("stake_cpu_quantity", cpu.to_string())
               ("transfer", true);
-      abi_serializer eosio_system_serializer{fc::json::from_string(contracts::eosio_system_abi.data()).as<abi_def>(), abi_serializer_max_time};
+      abi_serializer eosio_system_serializer{fc::json::from_string(contracts::eosio_system_abi().data()).as<abi_def>(), abi_serializer_max_time};
 
       auto payload_delegate = eosio_system_serializer.variant_to_binary( "delegatebw", variant_delegate, abi_serializer_max_time);
       eosio::chain::action act_delegate{vector<chain::permission_level>{{from,"active"}},
@@ -293,7 +293,7 @@ struct txn_test_gen_plugin_impl {
               ("payer", from.to_string())
               ("receiver", to.to_string())
               ("quant", quant.to_string());
-      abi_serializer eosio_system_serializer{fc::json::from_string(contracts::eosio_system_abi.data()).as<abi_def>(), abi_serializer_max_time};
+      abi_serializer eosio_system_serializer{fc::json::from_string(contracts::eosio_system_abi().data()).as<abi_def>(), abi_serializer_max_time};
 
       auto payload_buyram = eosio_system_serializer.variant_to_binary( "buyram", variant_buyram, abi_serializer_max_time);
       eosio::chain::action act_buyram{vector<chain::permission_level>{{from,name("active")}},
