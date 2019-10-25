@@ -60,9 +60,9 @@ struct filter_entry {
 
    //            receiver          action       actor
    bool match( const name& rr, const name& an, const name& ar ) const {
-      return (receiver.value == 0 || receiver == rr) &&
-             (action.value == 0 || action == an) &&
-             (actor.value == 0 || actor == ar);
+      return (receiver.to_uint64_t() == 0 || receiver == rr) &&
+             (action.to_uint64_t() == 0 || action == an) &&
+             (actor.to_uint64_t() == 0 || actor == ar);
    }
 };
 

@@ -9,7 +9,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <contracts.hpp>
-#include <snapshots.hpp>
+//#include <snapshots.hpp>
 
 using namespace eosio;
 using namespace testing;

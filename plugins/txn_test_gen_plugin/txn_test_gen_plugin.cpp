@@ -1,7 +1,3 @@
-/**
- *  @file
- *  @copyright defined in eos/LICENSE
- */
 #include <eosio/txn_test_gen_plugin/txn_test_gen_plugin.hpp>
 #include <eosio/chain_plugin/chain_plugin.hpp>
 #include <eosio/net_plugin/net_plugin.hpp>
@@ -23,10 +19,9 @@
 #include <WASM/WASM.h>
 #include <Runtime/Runtime.h>
 
-#include <eosio.token/eosio.token.wast.hpp>
-#include <eosio.token/eosio.token.abi.hpp>
-#include <eosio.system/eosio.system.abi.hpp>
-#include <eosio.system/eosio.system.wast.hpp>
+
+#include <contracts.hpp>
+
 
 namespace eosio { namespace detail {
 struct txn_test_gen_empty {};
@@ -143,53 +138,45 @@ struct txn_test_gen_plugin_impl {
           name newaccountA("aaaaaaaaaaaa");
           name newaccountB("bbbbbbbbbbbb");
           name newaccountC("cccccccccccc");
-          name creator(init_name);
+         name creator(init_name);
 
-          abi_def currency_abi_def = fc::json::from_string(eosio_token_abi).as<abi_def>();
+         abi_def currency_abi_def = fc::json::from_string(contracts::eosio_token_abi().data()).as<abi_def>();
 
-          controller& cc = app().get_plugin<chain_plugin>().chain();
-          auto chainid = app().get_plugin<chain_plugin>().get_chain_id();
-          auto abi_serializer_max_time = app().get_plugin<chain_plugin>().get_abi_serializer_max_time();
+         controller& cc = app().get_plugin<chain_plugin>().chain();
+         auto chainid = app().get_plugin<chain_plugin>().get_chain_id();
+         auto abi_serializer_max_time = app().get_plugin<chain_plugin>().get_abi_serializer_max_time();
 
-          abi_serializer eosio_token_serializer{fc::json::from_string(eosio_token_abi).as<abi_def>(), abi_serializer_max_time};
+         abi_serializer eosio_token_serializer{fc::json::from_string(contracts::eosio_token_abi().data()).as<abi_def>(), abi_serializer_max_time};
 
-          fc::crypto::private_key txn_test_receiver_A_priv_key = fc::crypto::private_key::regenerate(fc::sha256(std::string(64, 'a')));
-          fc::crypto::private_key txn_test_receiver_B_priv_key = fc::crypto::private_key::regenerate(fc::sha256(std::string(64, 'b')));
-          fc::crypto::private_key txn_test_receiver_C_priv_key = fc::crypto::private_key::regenerate(fc::sha256(std::string(64, 'c')));
-          fc::crypto::public_key  txn_text_receiver_A_pub_key = txn_test_receiver_A_priv_key.get_public_key();
-          fc::crypto::public_key  txn_text_receiver_B_pub_key = txn_test_receiver_B_priv_key.get_public_key();
-          fc::crypto::public_key  txn_text_receiver_C_pub_key = txn_test_receiver_C_priv_key.get_public_key();
-          fc::crypto::private_key creator_priv_key = fc::crypto::private_key(init_priv_key);
+         fc::crypto::private_key txn_test_receiver_A_priv_key = fc::crypto::private_key::regenerate(fc::sha256(std::string(64, 'a')));
+         fc::crypto::private_key txn_test_receiver_B_priv_key = fc::crypto::private_key::regenerate(fc::sha256(std::string(64, 'b')));
+         fc::crypto::private_key txn_test_receiver_C_priv_key = fc::crypto::private_key::regenerate(fc::sha256(std::string(64, 'c')));
+         fc::crypto::public_key  txn_text_receiver_A_pub_key = txn_test_receiver_A_priv_key.get_public_key();
+         fc::crypto::public_key  txn_text_receiver_B_pub_key = txn_test_receiver_B_priv_key.get_public_key();
+         fc::crypto::public_key  txn_text_receiver_C_pub_key = txn_test_receiver_C_priv_key.get_public_key();
+         fc::crypto::private_key creator_priv_key = fc::crypto::private_key(init_priv_key);
 
           eosio::chain::asset net{1000000, symbol(4,core_symbol.c_str())};
           eosio::chain::asset cpu{10000000000, symbol(4,core_symbol.c_str())};
           eosio::chain::asset ram{1000000, symbol(4,core_symbol.c_str())};
 
-          //create some test accounts
-          {
-              signed_transaction trx;
+         //create some test accounts
+         {
+            signed_transaction trx;
 
-              //create "A" account
-              {
-                  auto owner_auth   = eosio::chain::authority{1, {{txn_text_receiver_A_pub_key, 1}}, {}};
-                  auto active_auth  = eosio::chain::authority{1, {{txn_text_receiver_A_pub_key, 1}}, {}};
+            //create "A" account
+            {
+            auto owner_auth   = eosio::chain::authority{1, {{txn_text_receiver_A_pub_key, 1}}, {}};
+            auto active_auth  = eosio::chain::authority{1, {{txn_text_receiver_A_pub_key, 1}}, {}};
 
-                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,"active"}}, newaccount{creator, newaccountA, owner_auth, active_auth});
+            trx.actions.emplace_back(vector<chain::permission_level>{{creator,name("active")}}, newaccount{creator, newaccountA, owner_auth, active_auth});
+            }
+            //create "B" account
+            {
+            auto owner_auth   = eosio::chain::authority{1, {{txn_text_receiver_B_pub_key, 1}}, {}};
+            auto active_auth  = eosio::chain::authority{1, {{txn_text_receiver_B_pub_key, 1}}, {}};
 
-                  //delegate cpu net and buyram
-                  auto act_delegatebw = create_action_delegatebw(creator, newaccountA,net,cpu,abi_serializer_max_time);
-                  auto act_buyram = create_action_buyram(creator, newaccountA, ram, abi_serializer_max_time);
-
-                  trx.actions.emplace_back(act_delegatebw);
-                  trx.actions.emplace_back(act_buyram);
-
-              }
-              //create "B" account
-              {
-                  auto owner_auth   = eosio::chain::authority{1, {{txn_text_receiver_B_pub_key, 1}}, {}};
-                  auto active_auth  = eosio::chain::authority{1, {{txn_text_receiver_B_pub_key, 1}}, {}};
-
-                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,"active"}}, newaccount{creator, newaccountB, owner_auth, active_auth});
+            trx.actions.emplace_back(vector<chain::permission_level>{{creator,name("active")}}, newaccount{creator, newaccountB, owner_auth, active_auth});
 
                   //delegate cpu net and buyram
                   auto act_delegatebw = create_action_delegatebw(creator, newaccountB,net,cpu,abi_serializer_max_time);
@@ -199,11 +186,11 @@ struct txn_test_gen_plugin_impl {
                   trx.actions.emplace_back(act_buyram);
               }
               //create "cccccccccccc" account
-              {
-                  auto owner_auth   = eosio::chain::authority{1, {{txn_text_receiver_C_pub_key, 1}}, {}};
-                  auto active_auth  = eosio::chain::authority{1, {{txn_text_receiver_C_pub_key, 1}}, {}};
+            {
+            auto owner_auth   = eosio::chain::authority{1, {{txn_text_receiver_C_pub_key, 1}}, {}};
+            auto active_auth  = eosio::chain::authority{1, {{txn_text_receiver_C_pub_key, 1}}, {}};
 
-                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,"active"}}, newaccount{creator, newaccountC, owner_auth, active_auth});
+                  trx.actions.emplace_back(vector<chain::permission_level>{{creator,name("active")}}, newaccount{creator, newaccountC, owner_auth, active_auth});
 
                   //delegate cpu net and buyram
                   auto act_delegatebw = create_action_delegatebw(creator, newaccountC,net,cpu,abi_serializer_max_time);
@@ -214,28 +201,28 @@ struct txn_test_gen_plugin_impl {
               }
 
               trx.expiration = cc.head_block_time() + fc::seconds(30);
-              trx.set_reference_block(cc.head_block_id());
-              trx.sign(creator_priv_key, chainid);
-              trxs.emplace_back(std::move(trx));
+            trx.set_reference_block(cc.head_block_id());
+            trx.sign(creator_priv_key, chainid);
+            trxs.emplace_back(std::move(trx));
           }
 
           //set cccccccccccc contract to eosio.token & initialize it
           {
               signed_transaction trx;
 
-              vector<uint8_t> wasm = wast_to_wasm(std::string(eosio_token_wast));
+            vector<uint8_t> wasm = contracts::eosio_token_wasm();
 
               setcode handler;
               handler.account = newaccountC;
               handler.code.assign(wasm.begin(), wasm.end());
 
-              trx.actions.emplace_back( vector<chain::permission_level>{{newaccountC,"active"}}, handler);
+              trx.actions.emplace_back( vector<chain::permission_level>{{newaccountC,name("active")}}, handler);
 
               {
                   setabi handler;
                   handler.account = newaccountC;
-                  handler.abi = fc::raw::pack(json::from_string(eosio_token_abi).as<abi_def>());
-                  trx.actions.emplace_back( vector<chain::permission_level>{{newaccountC,"active"}}, handler);
+               handler.abi = fc::raw::pack(fc::json::from_string(contracts::eosio_token_abi().data()).as<abi_def>());
+                  trx.actions.emplace_back( vector<chain::permission_level>{{newaccountC,name("active")}}, handler);
               }
 
               {
@@ -412,7 +399,7 @@ struct txn_test_gen_plugin_impl {
               {
                   signed_transaction trx;
                   trx.actions.push_back(act_a_to_b);
-                  trx.context_free_actions.emplace_back(action({}, config::null_account_name, "nonce", fc::raw::pack(nonce++)));
+                  trx.context_free_actions.emplace_back(action({}, config::null_account_name, name("nonce"), fc::raw::pack(nonce++)));
                   trx.set_reference_block(reference_block_id);
                   trx.expiration = cc.head_block_time() + fc::seconds(30);
                   trx.max_net_usage_words = 100;
@@ -423,7 +410,7 @@ struct txn_test_gen_plugin_impl {
               {
                   signed_transaction trx;
                   trx.actions.push_back(act_b_to_a);
-                  trx.context_free_actions.emplace_back(action({}, config::null_account_name, "nonce", fc::raw::pack(nonce++)));
+                  trx.context_free_actions.emplace_back(action({}, config::null_account_name, name("nonce"), fc::raw::pack(nonce++)));
                   trx.set_reference_block(reference_block_id);
                   trx.expiration = cc.head_block_time() + fc::seconds(30);
                   trx.max_net_usage_words = 100;
