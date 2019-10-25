@@ -225,7 +225,7 @@ vector<chain::permission_level> get_account_permissions(const vector<string>& pe
       vector<string> pieces;
       split(pieces, p, boost::algorithm::is_any_of("@"));
       if( pieces.size() == 1 ) pieces.push_back( "active" );
-      return chain::permission_level{ .actor = pieces[0], .permission = pieces[1] };
+      return chain::permission_level{ .actor = name(pieces[0]), .permission = name(pieces[1]) };
    });
    vector<chain::permission_level> accountPermissions;
    boost::range::copy(fixedPermissions, back_inserter(accountPermissions));
@@ -273,7 +273,7 @@ string generate_nonce_string() {
 }
 
 chain::action generate_nonce_action() {
-   return chain::action( {}, config::null_account_name, "nonce", fc::raw::pack(fc::time_point::now().time_since_epoch().count()));
+   return chain::action( {}, config::null_account_name, name("nonce"), fc::raw::pack(fc::time_point::now().time_since_epoch().count()));
 }
 
 void prompt_for_wallet_password(string& pw, const string& name) {
@@ -578,7 +578,7 @@ chain::action create_open(const string& contract, const name& owner, symbol sym,
       ("ram_payer", ram_payer);
     return action {
       get_account_permissions(tx_permission, {ram_payer,config::active_name}),
-      contract, "open", variant_to_bin( contract, N(open), open_ )
+      contract, "open", variant_to_bin( name(contract), N(open), open_ )
    };
 }
 
@@ -592,7 +592,7 @@ chain::action create_transfer(const string& contract, const name& sender, const 
 
    return action {
       get_account_permissions(tx_permission, {sender,config::active_name}),
-      contract, "transfer", variant_to_bin( contract, N(transfer), transfer )
+      contract, "transfer", variant_to_bin( name(contract), N(transfer), transfer )
    };
 }
 
@@ -994,8 +994,8 @@ struct register_producer_subcommand {
             producer_key = public_key_type(producer_key_str);
          } EOS_RETHROW_EXCEPTIONS(public_key_type_exception, "Invalid producer public key: ${public_key}", ("public_key", producer_key_str))
 
-         auto regprod_var = regproducer_variant(producer_str, producer_key, url, loc );
-         auto accountPermissions = get_account_permissions(tx_permission, {producer_str,config::active_name});
+         auto regprod_var = regproducer_variant((name(producer_str), producer_key, url, loc );
+         auto accountPermissions = get_account_permissions(tx_permission, {name(producer_str),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(regproducer), regprod_var)});
       });
    }
@@ -1052,16 +1052,16 @@ struct create_account_subcommand {
             try {
                active_key = public_key_type(active_key_str);
             } EOS_RETHROW_EXCEPTIONS(public_key_type_exception, "Invalid active public key: ${public_key}", ("public_key", active_key_str));
-            auto create = create_newaccount(creator, account_name, owner_key, active_key);
+            auto create = create_newaccount(name(creator), account_name, owner_key, active_key);
             if (!simple) {
                EOSC_ASSERT( buy_ram_eos.size() || buy_ram_bytes_in_kbytes || buy_ram_bytes, "ERROR: One of --buy-ram, --buy-ram-kbytes or --buy-ram-bytes should have non-zero value" );
                EOSC_ASSERT( !buy_ram_bytes_in_kbytes || !buy_ram_bytes, "ERROR: --buy-ram-kbytes and --buy-ram-bytes cannot be set at the same time" );
-               action buyram = !buy_ram_eos.empty() ? create_buyram(creator, account_name, to_asset(buy_ram_eos))
-                  : create_buyrambytes(creator, account_name, (buy_ram_bytes_in_kbytes) ? (buy_ram_bytes_in_kbytes * 1024) : buy_ram_bytes);
+               action buyram = !buy_ram_eos.empty() ? create_buyram(name(creator), account_name, to_asset(buy_ram_eos))
+                  : create_buyrambytes(name(creator), account_name, (buy_ram_bytes_in_kbytes) ? (buy_ram_bytes_in_kbytes * 1024) : buy_ram_bytes);
                auto net = to_asset(stake_net);
                auto cpu = to_asset(stake_cpu);
                if ( net.get_amount() != 0 || cpu.get_amount() != 0 ) {
-                  action delegate = create_delegate( creator, account_name, net, cpu, transfer);
+                  action delegate = create_delegate( name(creator), account_name, net, cpu, transfer);
                   send_actions( { create, buyram, delegate } );
                } else {
                   send_actions( { create, buyram } );
@@ -1085,7 +1085,7 @@ struct unregister_producer_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("producer", producer_str);
 
-         auto accountPermissions = get_account_permissions(tx_permission, {producer_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(producer_str),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(unregprod), act_payload)});
       });
    }
@@ -1106,7 +1106,7 @@ struct vote_producer_proxy_subcommand {
                   ("voter", voter_str)
                   ("proxy", proxy_str)
                   ("producers", std::vector<account_name>{});
-         auto accountPermissions = get_account_permissions(tx_permission, {voter_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(voter_str),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(voteproducer), act_payload)});
       });
    }
@@ -1130,7 +1130,7 @@ struct vote_producers_subcommand {
                   ("voter", voter_str)
                   ("proxy", "")
                   ("producers", producer_names);
-         auto accountPermissions = get_account_permissions(tx_permission, {voter_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(voter_str),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(voteproducer), act_payload)});
       });
    }
@@ -1356,13 +1356,13 @@ struct delegate_bandwidth_subcommand {
                   ("stake_net_quantity", to_asset(stake_net_amount))
                   ("stake_cpu_quantity", to_asset(stake_cpu_amount))
                   ("transfer", transfer);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str),config::active_name});
          std::vector<chain::action> acts{create_action(accountPermissions, config::system_account_name, N(delegatebw), act_payload)};
          EOSC_ASSERT( !(buy_ram_amount.size()) || !buy_ram_bytes, "ERROR: --buyram and --buy-ram-bytes cannot be set at the same time" );
          if (buy_ram_amount.size()) {
-            acts.push_back( create_buyram(from_str, receiver_str, to_asset(buy_ram_amount)) );
+            acts.push_back( create_buyram(name(from_str), name(receiver_str), to_asset(buy_ram_amount)) );
          } else if (buy_ram_bytes) {
-            acts.push_back( create_buyrambytes(from_str, receiver_str, buy_ram_bytes) );
+            acts.push_back( create_buyrambytes(name(from_str), name(receiver_str), buy_ram_bytes) );
          }
          send_actions(std::move(acts));
       });
@@ -1390,7 +1390,7 @@ struct undelegate_bandwidth_subcommand {
                   ("receiver", receiver_str)
                   ("unstake_net_quantity", to_asset(unstake_net_amount))
                   ("unstake_cpu_quantity", to_asset(unstake_cpu_amount));
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(undelegatebw), act_payload)});
       });
    }
@@ -1411,7 +1411,7 @@ struct bidname_subcommand {
                   ("bidder", bidder_str)
                   ("newname", newname_str)
                   ("bid", to_asset(bid_amount));
-         auto accountPermissions = get_account_permissions(tx_permission, {bidder_str,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(bidder_str),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(bidname), act_payload)});
       });
    }
@@ -1514,9 +1514,9 @@ struct buyram_subcommand {
       buyram->set_callback([this] {
          EOSC_ASSERT( !kbytes || !bytes, "ERROR: --kbytes and --bytes cannot be set at the same time" );
          if (kbytes || bytes) {
-            send_actions( { create_buyrambytes(from_str, receiver_str, fc::to_uint64(amount) * ((kbytes) ? 1024ull : 1ull)) } );
+            send_actions( { create_buyrambytes(name(from_str), name(receiver_str), fc::to_uint64(amount) * ((kbytes) ? 1024ull : 1ull)) } );
          } else {
-            send_actions( { create_buyram(from_str, receiver_str, to_asset(amount)) } );
+            send_actions( { create_buyram(name(from_str), name(receiver_str), to_asset(amount)) } );
          }
       });
    }
@@ -1537,7 +1537,7 @@ struct sellram_subcommand {
             fc::variant act_payload = fc::mutable_variant_object()
                ("account", receiver_str)
                ("bytes", amount);
-            auto accountPermissions = get_account_permissions(tx_permission, {receiver_str,config::active_name});
+            auto accountPermissions = get_account_permissions(tx_permission, {name(receiver_str),config::active_name});
             send_actions({create_action(accountPermissions, config::system_account_name, N(sellram), act_payload)});
          });
    }
@@ -1554,7 +1554,7 @@ struct claimrewards_subcommand {
       claim_rewards->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("owner", owner);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(claimrewards), act_payload)});
       });
    }
@@ -1572,7 +1572,7 @@ struct regproxy_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("proxy", proxy)
                   ("isproxy", true);
-         auto accountPermissions = get_account_permissions(tx_permission, {proxy,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(proxy),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(regproxy), act_payload)});
       });
    }
@@ -1590,7 +1590,7 @@ struct unregproxy_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("proxy", proxy)
                   ("isproxy", false);
-         auto accountPermissions = get_account_permissions(tx_permission, {proxy,config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(proxy),config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(regproxy), act_payload)});
       });
    }
@@ -1609,7 +1609,7 @@ struct canceldelay_subcommand {
       add_standard_transaction_options(cancel_delay, "canceling_account@canceling_permission");
 
       cancel_delay->set_callback([this] {
-         auto canceling_auth = permission_level{canceling_account, canceling_permission};
+         auto canceling_auth = permission_level{name(canceling_account), name(canceling_permission)};
          fc::variant act_payload = fc::mutable_variant_object()
                   ("canceling_auth", canceling_auth)
                   ("trx_id", trx_id);
@@ -1633,7 +1633,7 @@ struct deposit_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("owner",  owner_str)
             ("amount", amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1653,7 +1653,7 @@ struct withdraw_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("owner",  owner_str)
             ("amount", amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1673,7 +1673,7 @@ struct buyrex_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("from",   from_str)
             ("amount", amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1697,7 +1697,7 @@ struct lendrex_subcommand {
          fc::variant act_payload2 = fc::mutable_variant_object()
             ("from",   from_str)
             ("amount", amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name1, act_payload1),
                        create_action(accountPermissions, config::system_account_name, act_name2, act_payload2)});
       });
@@ -1724,7 +1724,7 @@ struct unstaketorex_subcommand {
             ("receiver", receiver_str)
             ("from_net", from_net_str)
             ("from_cpu", from_cpu_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1744,7 +1744,7 @@ struct sellrex_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("from", from_str)
             ("rex",  rex_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1760,7 +1760,7 @@ struct cancelrexorder_subcommand {
       add_standard_transaction_options(cancelrexorder, "owner@active");
       cancelrexorder->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()("owner", owner_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1786,7 +1786,7 @@ struct rentcpu_subcommand {
             ("receiver",     receiver_str)
             ("loan_payment", loan_payment_str)
             ("loan_fund",    loan_fund_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1812,7 +1812,7 @@ struct rentnet_subcommand {
             ("receiver",     receiver_str)
             ("loan_payment", loan_payment_str)
             ("loan_fund",    loan_fund_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1835,7 +1835,7 @@ struct fundcpuloan_subcommand {
             ("from",     from_str)
             ("loan_num", loan_num_str)
             ("payment",  payment_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1858,7 +1858,7 @@ struct fundnetloan_subcommand {
             ("from",     from_str)
             ("loan_num", loan_num_str)
             ("payment",  payment_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1881,7 +1881,7 @@ struct defcpuloan_subcommand {
             ("from",     from_str)
             ("loan_num", loan_num_str)
             ("amount",   amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1904,7 +1904,7 @@ struct defnetloan_subcommand {
             ("from",     from_str)
             ("loan_num", loan_num_str)
             ("amount",   amount_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {from_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1924,7 +1924,7 @@ struct mvtosavings_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("owner", owner_str)
             ("rex",   rex_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1944,7 +1944,7 @@ struct mvfrsavings_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
             ("owner", owner_str)
             ("rex",   rex_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1960,7 +1960,7 @@ struct updaterex_subcommand {
       add_standard_transaction_options(updaterex, "owner@active");
       updaterex->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()("owner", owner_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1976,7 +1976,7 @@ struct consolidate_subcommand {
       add_standard_transaction_options(consolidate, "owner@active");
       consolidate->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()("owner", owner_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -1996,7 +1996,7 @@ struct rexexec_subcommand {
             fc::variant act_payload = fc::mutable_variant_object()
                ("user", user_str)
                ("max",  max_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {user_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(user_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -2012,7 +2012,7 @@ struct closerex_subcommand {
       add_standard_transaction_options(closerex, "owner@active");
       closerex->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()("owner", owner_str);
-         auto accountPermissions = get_account_permissions(tx_permission, {owner_str, config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, act_name, act_payload)});
       });
    }
@@ -3779,7 +3779,7 @@ int main( int argc, char** argv ) {
          args("proposal_hash", proposal_hash);
       }
 
-      auto accountPermissions = get_account_permissions(tx_permission, {proposer,config::active_name});
+      auto accountPermissions = get_account_permissions(tx_permission, {name(proposer),config::active_name});
       send_actions({chain::action{accountPermissions, "eosio.msig", action, variant_to_bin( N(eosio.msig), action, args ) }});
    };
 
@@ -3843,7 +3843,7 @@ int main( int argc, char** argv ) {
       auto args = fc::mutable_variant_object()
          ("account", invalidator);
 
-      auto accountPermissions = get_account_permissions(tx_permission, {invalidator,config::active_name});
+      auto accountPermissions = get_account_permissions(tx_permission, {name(invalidator),config::active_name});
       send_actions({chain::action{accountPermissions, "eosio.msig", "invalidate", variant_to_bin( N(eosio.msig), "invalidate", args ) }});
    });
 

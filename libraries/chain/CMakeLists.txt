@@ -5,6 +5,17 @@ file(GLOB HEADERS "include/eosio/chain/*.hpp"
                   "include/eosio/chain/webassembly/*.hpp"
                   "${CMAKE_CURRENT_BINARY_DIR}/include/eosio/chain/core_symbol.hpp" )
 
+if(APPLE AND UNIX)
+   set(PLATFORM_TIMER_IMPL platform_timer_macos.cpp)
+else()
+   try_run(POSIX_TIMER_TEST_RUN_RESULT POSIX_TIMER_TEST_COMPILE_RESULT ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/platform_timer_posix_test.c)
+   if(POSIX_TIMER_TEST_RUN_RESULT EQUAL 0)
+      set(PLATFORM_TIMER_IMPL platform_timer_posix.cpp)
+   else()
+      set(PLATFORM_TIMER_IMPL platform_timer_asio_fallback.cpp)
+   endif()
+endif()
+
 if("wavm" IN_LIST EOSIO_WASM_RUNTIMES)
    set(CHAIN_WAVM_SOURCES "webassembly/wavm.cpp")
 endif()
@@ -40,6 +51,7 @@ if("eos-vm" IN_LIST EOSIO_WASM_RUNTIMES OR "eos-vm-jit" IN_LIST EOSIO_WASM_RUNTI
    set(CHAIN_EOSVM_SOURCES "webassembly/eos-vm.cpp")
    set(CHAIN_EOSVM_LIBRARIES eos-vm)
 endif()
+
 ## SORT .cpp by most likely to change / break compile
 add_library( eosio_chain
              merkle.cpp
@@ -84,8 +96,10 @@ add_library( eosio_chain
 #
 #             contracts/chain_initializer.cpp
 
-
+             trace.cpp
              transaction_metadata.cpp
+             platform_timer_accuracy.cpp
+             ${PLATFORM_TIMER_IMPL}
              ${HEADERS}
              )
 
