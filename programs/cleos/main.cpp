@@ -578,7 +578,7 @@ chain::action create_open(const string& contract, const name& owner, symbol sym,
       ("ram_payer", ram_payer);
     return action {
       get_account_permissions(tx_permission, {ram_payer,config::active_name}),
-      name(contract), "open", variant_to_bin( name(contract), N(open), open_ )
+      name(contract), name("open"), variant_to_bin( name(contract), N(open), open_ )
    };
 }
 
@@ -592,7 +592,7 @@ chain::action create_transfer(const string& contract, const name& sender, const 
 
    return action {
       get_account_permissions(tx_permission, {sender,config::active_name}),
-      name(contract), "transfer", variant_to_bin( name(contract), N(transfer), transfer )
+      name(contract), name("transfer"), variant_to_bin( name(contract), N(transfer), transfer )
    };
 }
 
@@ -702,7 +702,7 @@ struct set_account_permission_subcommand {
 
    set_account_permission_subcommand(CLI::App* accountCmd) {
       auto permissions = accountCmd->add_subcommand("permission", localized("set parameters dealing with account permissions"));
-      permissions->add_option("account", account, localized("The account to set/delete a permission authority for"))->required();
+      permissions->add_option("account", account.to_string(), localized("The account to set/delete a permission authority for"))->required();
       permissions->add_option("permission", permission, localized("The permission name to set/delete an authority for"))->required();
       permissions->add_option("authority", authority_json_or_file, localized("[delete] NULL, [create/update] public key, JSON string or filename defining the authority, [code] contract name"));
       permissions->add_option("parent", parent, localized("[create] The permission name of this parents permission, defaults to 'active'"));
@@ -1052,11 +1052,11 @@ struct create_account_subcommand {
             try {
                active_key = public_key_type(active_key_str);
             } EOS_RETHROW_EXCEPTIONS(public_key_type_exception, "Invalid active public key: ${public_key}", ("public_key", active_key_str));
-            auto create = create_newaccount(name(creator), account_name, owner_key, active_key);
+            auto create = create_newaccount(name(creator), name(account_name), owner_key, active_key);
             if (!simple) {
                EOSC_ASSERT( buy_ram_eos.size() || buy_ram_bytes_in_kbytes || buy_ram_bytes, "ERROR: One of --buy-ram, --buy-ram-kbytes or --buy-ram-bytes should have non-zero value" );
                EOSC_ASSERT( !buy_ram_bytes_in_kbytes || !buy_ram_bytes, "ERROR: --buy-ram-kbytes and --buy-ram-bytes cannot be set at the same time" );
-               action buyram = !buy_ram_eos.empty() ? create_buyram(name(creator), account_name, to_asset(buy_ram_eos))
+               action buyram = !buy_ram_eos.empty() ? create_buyram(name(creator), name(account_name), to_asset(buy_ram_eos))
                   : create_buyrambytes(name(creator), name(account_name), (buy_ram_bytes_in_kbytes) ? (buy_ram_bytes_in_kbytes * 1024) : buy_ram_bytes);
                auto net = to_asset(stake_net);
                auto cpu = to_asset(stake_cpu);
@@ -2067,7 +2067,7 @@ void get_account( const string& accountName, const string& coresym, bool json_fo
             sep = ", ";
          }
          for ( auto& acc : p.required_auth.accounts ) {
-            std::cout << sep << acc.weight << ' ' << acc.permission.actor.to_string() << '@' << acc.permission.permission.to_strig();
+            std::cout << sep << acc.weight << ' ' << acc.permission.actor.to_string() << '@' << acc.permission.permission.to_string();
             sep = ", ";
          }
          std::cout << std::endl;
@@ -3068,11 +3068,11 @@ int main( int argc, char** argv ) {
       }
 
       auto transfer_amount = to_asset(name(con), amount);
-      auto transfer = create_transfer(con, sender, recipient, transfer_amount, memo);
+      auto transfer = create_transfer(con, name(sender), name(recipient), transfer_amount, memo);
       if (!pay_ram) {
          send_actions( { transfer });
       } else {
-         auto open_ = create_open(con, recipient, transfer_amount.get_symbol(), sender);
+         auto open_ = create_open(con, name(recipient), transfer_amount.get_symbol(), name(sender));
          send_actions( { open_, transfer } );
       }
    });
@@ -3339,7 +3339,7 @@ int main( int argc, char** argv ) {
       }
       auto accountPermissions = get_account_permissions(tx_permission);
 
-      send_actions({chain::action{accountPermissions, contract_account, action, variant_to_bin( name(contract_account), action, action_args_var ) }});
+      send_actions({chain::action{accountPermissions, name(contract_account), name(action), variant_to_bin( name(contract_account), name(action), action_args_var ) }});
    });
 
    // push transaction
@@ -3426,7 +3426,7 @@ int main( int argc, char** argv ) {
          trx_var = json_from_file_or_string(proposed_transaction);
       } EOS_RETHROW_EXCEPTIONS(transaction_type_exception, "Fail to parse transaction JSON '${data}'", ("data",proposed_transaction))
       transaction proposed_trx = trx_var.as<transaction>();
-      bytes proposed_trx_serialized = variant_to_bin( proposed_contract, proposed_action, trx_var );
+      bytes proposed_trx_serialized = variant_to_bin( name(proposed_contract), name(proposed_action), trx_var );
 
       vector<permission_level> reqperm;
       try {
@@ -3441,7 +3441,7 @@ int main( int argc, char** argv ) {
       auto accountPermissions = get_account_permissions(tx_permission);
       if (accountPermissions.empty()) {
          if (!proposer.empty()) {
-            accountPermissions = vector<permission_level>{{proposer, config::active_name}};
+            accountPermissions = vector<permission_level>{{name(proposer), config::active_name}};
          } else {
             EOS_THROW(missing_auth_exception, "Authority is not provided (either by multisig parameter <proposer> or -p)");
          }
@@ -3508,7 +3508,7 @@ int main( int argc, char** argv ) {
          ("requested", requested_perm_var)
          ("trx", trx_var);
 
-      send_actions({chain::action{accountPermissions, "eosio.msig", "propose", variant_to_bin( N(eosio.msig), N(propose), args ) }});
+      send_actions({chain::action{accountPermissions, name("eosio.msig"), name("propose"), variant_to_bin( N(eosio.msig), N(propose), args ) }});
    });
 
 
@@ -3658,8 +3658,8 @@ int main( int argc, char** argv ) {
                                        ("scope", proposer)
                                        ("table", "opposes")
                                        ("table_key", "")
-                                       ("lower_bound", name(proposal_name).value)
-                                       ("upper_bound", name(proposal_name).value + 1)
+                                       ("lower_bound", name(proposal_name).to_uint64_t())
+                                       ("upper_bound", name(proposal_name).to_uint64_t() + 1)
                                        // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                        // Change to name(proposal_name).value when cleos no longer needs to support nodeos versions older than 1.5.0
                                        ("limit", 1)
@@ -3780,7 +3780,7 @@ int main( int argc, char** argv ) {
       }
 
       auto accountPermissions = get_account_permissions(tx_permission, {name(proposer),config::active_name});
-      send_actions({chain::action{accountPermissions, "eosio.msig", action, variant_to_bin( N(eosio.msig), action, args ) }});
+      send_actions({chain::action{accountPermissions, name("eosio.msig"), name(action), variant_to_bin( N(eosio.msig),  name(action), args ) }});
    };
 
    // multisig approve
@@ -3844,7 +3844,7 @@ int main( int argc, char** argv ) {
          ("account", invalidator);
 
       auto accountPermissions = get_account_permissions(tx_permission, {name(invalidator),config::active_name});
-      send_actions({chain::action{accountPermissions, "eosio.msig", "invalidate", variant_to_bin( N(eosio.msig), "invalidate", args ) }});
+      send_actions({chain::action{accountPermissions, name("eosio.msig"), name("invalidate"), variant_to_bin( N(eosio.msig), name("invalidate"), args ) }});
    });
 
    // multisig cancel
@@ -3858,7 +3858,7 @@ int main( int argc, char** argv ) {
       auto accountPermissions = get_account_permissions(tx_permission);
       if (accountPermissions.empty()) {
          if (!canceler.empty()) {
-            accountPermissions = vector<permission_level>{{canceler, config::active_name}};
+            accountPermissions = vector<permission_level>{{name(canceler), config::active_name}};
          } else {
             EOS_THROW(missing_auth_exception, "Authority is not provided (either by multisig parameter <canceler> or -p)");
          }
@@ -3871,7 +3871,7 @@ int main( int argc, char** argv ) {
          ("proposal_name", proposal_name)
          ("canceler", canceler);
 
-      send_actions({chain::action{accountPermissions, "eosio.msig", "cancel", variant_to_bin( N(eosio.msig), N(cancel), args ) }});
+      send_actions({chain::action{accountPermissions, name("eosio.msig"), name("cancel"), variant_to_bin( N(eosio.msig), N(cancel), args ) }});
       }
    );
 
@@ -3886,7 +3886,7 @@ int main( int argc, char** argv ) {
       auto accountPermissions = get_account_permissions(tx_permission);
       if (accountPermissions.empty()) {
          if (!executer.empty()) {
-            accountPermissions = vector<permission_level>{{executer, config::active_name}};
+            accountPermissions = vector<permission_level>{{name(executer), config::active_name}};
          } else {
             EOS_THROW(missing_auth_exception, "Authority is not provided (either by multisig parameter <executer> or -p)");
          }
@@ -3900,7 +3900,7 @@ int main( int argc, char** argv ) {
          ("proposal_name", proposal_name)
          ("executer", executer);
 
-      send_actions({chain::action{accountPermissions, "eosio.msig", "exec", variant_to_bin( N(eosio.msig), N(exec), args ) }});
+      send_actions({chain::action{accountPermissions, name("eosio.msig"), name("exec"), variant_to_bin( N(eosio.msig), N(exec), args ) }});
       }
    );
 
@@ -3926,14 +3926,14 @@ int main( int argc, char** argv ) {
 
       auto accountPermissions = get_account_permissions(tx_permission);
       if( accountPermissions.empty() ) {
-         accountPermissions = vector<permission_level>{{executer, config::active_name}, {wrap_con, config::active_name}};
+         accountPermissions = vector<permission_level>{{name(executer), config::active_name}, {name(wrap_con), config::active_name}};
       }
 
       auto args = fc::mutable_variant_object()
          ("executer", executer )
          ("trx", trx_var);
 
-      send_actions({chain::action{accountPermissions, wrap_con, "exec", variant_to_bin( wrap_con, N(exec), args ) }});
+      send_actions({chain::action{accountPermissions, name(wrap_con), name("exec"), variant_to_bin( name(wrap_con), N(exec), args ) }});
    });
 
    // system subcommand
