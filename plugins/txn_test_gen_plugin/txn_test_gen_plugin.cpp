@@ -282,7 +282,7 @@ struct txn_test_gen_plugin_impl {
       abi_serializer eosio_system_serializer{fc::json::from_string(contracts::eosio_system_abi().data()).as<abi_def>(), abi_serializer_max_time};
 
       auto payload_delegate = eosio_system_serializer.variant_to_binary( "delegatebw", variant_delegate, abi_serializer_max_time);
-      eosio::chain::action act_delegate{vector<chain::permission_level>{{from,"active"}},
+      eosio::chain::action act_delegate{vector<chain::permission_level>{{from,name("active")}},
               config::system_account_name, N(delegatebw), payload_delegate};
 
       return act_delegate;
