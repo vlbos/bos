@@ -19,9 +19,9 @@
 #include <WASM/WASM.h>
 #include <Runtime/Runtime.h>
 
-
 #include <contracts.hpp>
 
+using namespace eosio::testing;
 
 namespace eosio { namespace detail {
 struct txn_test_gen_empty {};
@@ -279,7 +279,7 @@ struct txn_test_gen_plugin_impl {
               ("stake_net_quantity", net.to_string())
               ("stake_cpu_quantity", cpu.to_string())
               ("transfer", true);
-      abi_serializer eosio_system_serializer{fc::json::from_string(eosio_system_abi).as<abi_def>(), abi_serializer_max_time};
+      abi_serializer eosio_system_serializer{fc::json::from_string(contracts::eosio_system_abi.data()).as<abi_def>(), abi_serializer_max_time};
 
       auto payload_delegate = eosio_system_serializer.variant_to_binary( "delegatebw", variant_delegate, abi_serializer_max_time);
       eosio::chain::action act_delegate{vector<chain::permission_level>{{from,"active"}},
@@ -293,10 +293,10 @@ struct txn_test_gen_plugin_impl {
               ("payer", from.to_string())
               ("receiver", to.to_string())
               ("quant", quant.to_string());
-      abi_serializer eosio_system_serializer{fc::json::from_string(eosio_system_abi).as<abi_def>(), abi_serializer_max_time};
+      abi_serializer eosio_system_serializer{fc::json::from_string(contracts::eosio_system_abi.data()).as<abi_def>(), abi_serializer_max_time};
 
       auto payload_buyram = eosio_system_serializer.variant_to_binary( "buyram", variant_buyram, abi_serializer_max_time);
-      eosio::chain::action act_buyram{vector<chain::permission_level>{{from,"active"}},
+      eosio::chain::action act_buyram{vector<chain::permission_level>{{from,name("active")}},
               config::system_account_name, N(buyram), payload_buyram};
 
       return act_buyram;
@@ -319,7 +319,7 @@ struct txn_test_gen_plugin_impl {
 
       controller& cc = app().get_plugin<chain_plugin>().chain();
       auto abi_serializer_max_time = app().get_plugin<chain_plugin>().get_abi_serializer_max_time();
-      abi_serializer eosio_token_serializer{fc::json::from_string(eosio_token_abi).as<abi_def>(), abi_serializer_max_time};
+      abi_serializer eosio_token_serializer{fc::json::from_string(contracts::eosio_token_abi().data()).as<abi_def>(), abi_serializer_max_time};
       //create the actions here
       act_a_to_b.account = N(cccccccccccc);
       act_a_to_b.name = N(transfer);

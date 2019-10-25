@@ -4,6 +4,7 @@ add_library( txn_test_gen_plugin
              ${HEADERS} )
 
 
-target_link_libraries( txn_test_gen_plugin appbase fc http_plugin chain_plugin net_plugin)
-target_include_directories( txn_test_gen_plugin PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" )
-target_include_directories( txn_test_gen_plugin PUBLIC ${CMAKE_BINARY_DIR}/contracts )
+target_link_libraries( txn_test_gen_plugin appbase fc http_plugin chain_plugin net_plugin eosio_testing)
+target_include_directories( txn_test_gen_plugin PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+                            txn_test_gen_plugin PUBLIC ${CMAKE_SOURCE_DIR}/libraries/testing/include
+                            txn_test_gen_plugin PUBLIC ${CMAKE_BINARY_DIR}/unittests/include )

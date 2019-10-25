@@ -693,16 +693,16 @@ inline asset to_asset( const string& s ) {
 }
 
 struct set_account_permission_subcommand {
-   name account;
-   name permission;
+   string account;
+   string permission;
    string authority_json_or_file;
-   name parent;
+   string parent;
    bool add_code;
    bool remove_code;
 
    set_account_permission_subcommand(CLI::App* accountCmd) {
       auto permissions = accountCmd->add_subcommand("permission", localized("set parameters dealing with account permissions"));
-      permissions->add_option("account", account.to_string(), localized("The account to set/delete a permission authority for"))->required();
+      permissions->add_option("account", account, localized("The account to set/delete a permission authority for"))->required();
       permissions->add_option("permission", permission, localized("The permission name to set/delete an authority for"))->required();
       permissions->add_option("authority", authority_json_or_file, localized("[delete] NULL, [create/update] public key, JSON string or filename defining the authority, [code] contract name"));
       permissions->add_option("parent", parent, localized("[create] The permission name of this parents permission, defaults to 'active'"));
@@ -717,34 +717,34 @@ struct set_account_permission_subcommand {
 
          authority auth;
 
-         bool need_parent = parent.empty() && (permission != name("owner"));
+         bool need_parent = parent.empty() && (name(permission) != name("owner"));
          bool need_auth = add_code || remove_code;
 
          if ( !need_auth && boost::iequals(authority_json_or_file, "null") ) {
-            send_actions( { create_deleteauth(account, permission) } );
+            send_actions( { create_deleteauth(name(account), name(permission)) } );
             return;
          }
 
          if ( need_parent || need_auth ) {
-            fc::variant json = call(get_account_func, fc::mutable_variant_object("account_name", account.to_string()));
+            fc::variant json = call(get_account_func, fc::mutable_variant_object("account_name", account));
             auto res = json.as<eosio::chain_apis::read_only::get_account_results>();
             auto itr = std::find_if(res.permissions.begin(), res.permissions.end(), [&](const auto& perm) {
-               return perm.perm_name == permission;
+               return perm.perm_name == name(permission);
             });
 
             if ( need_parent ) {
                // see if we can auto-determine the proper parent
                if ( itr != res.permissions.end() ) {
-                  parent = (*itr).parent;
+                  parent = (*itr).parent.to_string();
                } else {
                   // if this is a new permission and there is no parent we default to "active"
-                  parent = name(config::active_name);
+                  parent = config::active_name.to_string();
                }
             }
 
             if ( need_auth ) {
-               auto actor = (authority_json_or_file.empty()) ? account : name(authority_json_or_file);
-               auto code_name = name(config::eosio_code_name);
+               auto actor = (authority_json_or_file.empty()) ? name(account) : name(authority_json_or_file);
+               auto code_name = config::eosio_code_name;
 
                if ( itr != res.permissions.end() ) {
                   // fetch existing authority
@@ -787,7 +787,7 @@ struct set_account_permission_subcommand {
                         // remove code permission, if authority becomes empty by the removal of code permission, delete permission
                         auth.accounts.erase( itr2 );
                         if ( auth.keys.empty() && auth.accounts.empty() && auth.waits.empty() ) {
-                           send_actions( { create_deleteauth(account, permission) } );
+                           send_actions( { create_deleteauth(name(account), name(permission)) } );
                            return;
                         }
                      } else {
@@ -818,7 +818,7 @@ struct set_account_permission_subcommand {
             auth = parse_json_authority_or_key(authority_json_or_file);
          }
 
-         send_actions( { create_updateauth(account, permission, parent, auth) } );
+         send_actions( { create_updateauth(name(account), name(permission), name(parent), auth) } );
       });
    }
 };
@@ -1114,7 +1114,7 @@ struct vote_producer_proxy_subcommand {
 
 struct vote_producers_subcommand {
    string voter_str;
-   vector<eosio::name> producer_names;
+   vector<std::string> producer_names;
 
    vote_producers_subcommand(CLI::App* actionRoot) {
       auto vote_producers = actionRoot->add_subcommand("prods", localized("Vote for one or more producers"));
@@ -1130,15 +1130,15 @@ struct vote_producers_subcommand {
                   ("voter", voter_str)
                   ("proxy", "")
                   ("producers", producer_names);
-         auto accountPermissions = get_account_permissions(tx_permission, {name(voter_str),config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(voter_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(voteproducer), act_payload)});
       });
    }
 };
 
 struct approve_producer_subcommand {
-   eosio::name voter;
-   eosio::name producer_name;
+   string voter;
+   string producer_name;
 
    approve_producer_subcommand(CLI::App* actionRoot) {
       auto approve_producer = actionRoot->add_subcommand("approve", localized("Add one producer to list of voted producers"));
@@ -1152,8 +1152,8 @@ struct approve_producer_subcommand {
                                ("scope", name(config::system_account_name).to_string())
                                ("table", "voters")
                                ("table_key", "owner")
-                               ("lower_bound", voter.to_uint64_t())
-                               ("upper_bound", voter.to_uint64_t() + 1)
+                               ("lower_bound", name(voter).to_uint64_t())
+                               ("upper_bound", name(voter).to_uint64_t() + 1)
                                // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                // Change to voter.value when cleos no longer needs to support nodeos versions older than 1.5.0
                                ("limit", 1)
@@ -1172,7 +1172,7 @@ struct approve_producer_subcommand {
             for ( auto& x : prod_vars ) {
                prods.push_back( name(x.as_string()) );
             }
-            prods.push_back( producer_name );
+            prods.push_back( name(producer_name) );
             std::sort( prods.begin(), prods.end() );
             auto it = std::unique( prods.begin(), prods.end() );
             if (it != prods.end() ) {
@@ -1183,15 +1183,15 @@ struct approve_producer_subcommand {
                ("voter", voter)
                ("proxy", "")
                ("producers", prods);
-            auto accountPermissions = get_account_permissions(tx_permission, {voter,config::active_name});
+            auto accountPermissions = get_account_permissions(tx_permission, {name(voter), config::active_name});
             send_actions({create_action(accountPermissions, config::system_account_name, N(voteproducer), act_payload)});
       });
    }
 };
 
 struct unapprove_producer_subcommand {
-   eosio::name voter;
-   eosio::name producer_name;
+   string voter;
+   string producer_name;
 
    unapprove_producer_subcommand(CLI::App* actionRoot) {
       auto approve_producer = actionRoot->add_subcommand("unapprove", localized("Remove one producer from list of voted producers"));
@@ -1205,8 +1205,8 @@ struct unapprove_producer_subcommand {
                                ("scope", name(config::system_account_name).to_string())
                                ("table", "voters")
                                ("table_key", "owner")
-                               ("lower_bound", voter.to_uint64_t())
-                               ("upper_bound", voter.to_uint64_t() + 1)
+                               ("lower_bound", name(voter).to_uint64_t())
+                               ("upper_bound", name(voter).to_uint64_t() + 1)
                                // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                // Change to voter.value when cleos no longer needs to support nodeos versions older than 1.5.0
                                ("limit", 1)
@@ -1225,7 +1225,7 @@ struct unapprove_producer_subcommand {
             for ( auto& x : prod_vars ) {
                prods.push_back( name(x.as_string()) );
             }
-            auto it = std::remove( prods.begin(), prods.end(), producer_name );
+            auto it = std::remove( prods.begin(), prods.end(), name(producer_name) );
             if (it == prods.end() ) {
                std::cerr << "Cannot remove: producer \"" << producer_name << "\" is not on the list." << std::endl;
                return;
@@ -1235,7 +1235,7 @@ struct unapprove_producer_subcommand {
                ("voter", voter)
                ("proxy", "")
                ("producers", prods);
-            auto accountPermissions = get_account_permissions(tx_permission, {voter,config::active_name});
+            auto accountPermissions = get_account_permissions(tx_permission, {name(voter), config::active_name});
             send_actions({create_action(accountPermissions, config::system_account_name, N(voteproducer), act_payload)});
       });
    }
@@ -1356,7 +1356,7 @@ struct delegate_bandwidth_subcommand {
                   ("stake_net_quantity", to_asset(stake_net_amount))
                   ("stake_cpu_quantity", to_asset(stake_cpu_amount))
                   ("transfer", transfer);
-         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str),config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          std::vector<chain::action> acts{create_action(accountPermissions, config::system_account_name, N(delegatebw), act_payload)};
          EOSC_ASSERT( !(buy_ram_amount.size()) || !buy_ram_bytes, "ERROR: --buyram and --buy-ram-bytes cannot be set at the same time" );
          if (buy_ram_amount.size()) {
@@ -1390,7 +1390,7 @@ struct undelegate_bandwidth_subcommand {
                   ("receiver", receiver_str)
                   ("unstake_net_quantity", to_asset(unstake_net_amount))
                   ("unstake_cpu_quantity", to_asset(unstake_cpu_amount));
-         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str),config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(from_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(undelegatebw), act_payload)});
       });
    }
@@ -1411,7 +1411,7 @@ struct bidname_subcommand {
                   ("bidder", bidder_str)
                   ("newname", newname_str)
                   ("bid", to_asset(bid_amount));
-         auto accountPermissions = get_account_permissions(tx_permission, {name(bidder_str),config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(bidder_str), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(bidname), act_payload)});
       });
    }
@@ -1419,7 +1419,7 @@ struct bidname_subcommand {
 
 struct bidname_info_subcommand {
    bool print_json = false;
-   name newname;
+   string newname;
    bidname_info_subcommand(CLI::App* actionRoot) {
       auto list_producers = actionRoot->add_subcommand("bidnameinfo", localized("Get bidname info"));
       list_producers->add_flag("--json,-j", print_json, localized("Output in JSON format"));
@@ -1427,19 +1427,18 @@ struct bidname_info_subcommand {
       list_producers->set_callback([this] {
          auto rawResult = call(get_table_func, fc::mutable_variant_object("json", true)
                                ("code", "eosio")("scope", "eosio")("table", "namebids")
-                               ("lower_bound", newname.to_uint64_t())
-                               ("upper_bound", newname.to_uint64_t() + 1)
+                               ("lower_bound", name(newname).to_uint64_t())
+                               ("upper_bound", name(newname).to_uint64_t() + 1)
                                // Less than ideal upper_bound usage preserved so cleos can still work with old buggy nodeos versions
                                // Change to newname.value when cleos no longer needs to support nodeos versions older than 1.5.0
                                ("limit", 1));
-
          if ( print_json ) {
             std::cout << fc::json::to_pretty_string(rawResult) << std::endl;
             return;
          }
          auto result = rawResult.as<eosio::chain_apis::read_only::get_table_rows_result>();
          // Condition in if statement below can simply be res.rows.empty() when cleos no longer needs to support nodeos versions older than 1.5.0
-         if( result.rows.empty() || result.rows[0].get_object()["newname"].as_string() != newname.to_string() ) {
+         if( result.rows.empty() || result.rows[0].get_object()["newname"].as_string() != name(newname).to_string() ) {
             std::cout << "No bidname record found" << std::endl;
             return;
          }
@@ -1460,7 +1459,7 @@ struct bidname_info_subcommand {
 };
 
 struct list_bw_subcommand {
-   eosio::name account;
+   string account;
    bool print_json = false;
 
    list_bw_subcommand(CLI::App* actionRoot) {
@@ -1472,7 +1471,7 @@ struct list_bw_subcommand {
             //get entire table in scope of user account
             auto result = call(get_table_func, fc::mutable_variant_object("json", true)
                                ("code", name(config::system_account_name).to_string())
-                               ("scope", account.to_string())
+                               ("scope", name(account).to_string())
                                ("table", "delband")
             );
             if (!print_json) {
@@ -1537,7 +1536,7 @@ struct sellram_subcommand {
             fc::variant act_payload = fc::mutable_variant_object()
                ("account", receiver_str)
                ("bytes", amount);
-            auto accountPermissions = get_account_permissions(tx_permission, {name(receiver_str),config::active_name});
+            auto accountPermissions = get_account_permissions(tx_permission, {name(receiver_str), config::active_name});
             send_actions({create_action(accountPermissions, config::system_account_name, N(sellram), act_payload)});
          });
    }
@@ -1554,7 +1553,7 @@ struct claimrewards_subcommand {
       claim_rewards->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("owner", owner);
-         auto accountPermissions = get_account_permissions(tx_permission, {name(owner),config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(owner), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(claimrewards), act_payload)});
       });
    }
@@ -1572,7 +1571,7 @@ struct regproxy_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("proxy", proxy)
                   ("isproxy", true);
-         auto accountPermissions = get_account_permissions(tx_permission, {name(proxy),config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(proxy), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(regproxy), act_payload)});
       });
    }
@@ -1590,7 +1589,7 @@ struct unregproxy_subcommand {
          fc::variant act_payload = fc::mutable_variant_object()
                   ("proxy", proxy)
                   ("isproxy", false);
-         auto accountPermissions = get_account_permissions(tx_permission, {name(proxy),config::active_name});
+         auto accountPermissions = get_account_permissions(tx_permission, {name(proxy), config::active_name});
          send_actions({create_action(accountPermissions, config::system_account_name, N(regproxy), act_payload)});
       });
    }
@@ -1715,8 +1714,8 @@ struct unstaketorex_subcommand {
       auto unstaketorex = actionRoot->add_subcommand("unstaketorex", localized("Buy REX using staked tokens"));
       unstaketorex->add_option("owner",    owner_str,    localized("Account buying REX tokens"))->required();
       unstaketorex->add_option("receiver", receiver_str, localized("Account that tokens have been staked to"))->required();
-      unstaketorex->add_option("from_net", from_net_str, localized("Amount to be unstaked from CPU resources and used in REX purchase"))->required();
-      unstaketorex->add_option("from_cpu", from_cpu_str, localized("Amount to be unstaked from Net resources and used in REX purchase"))->required();
+      unstaketorex->add_option("from_net", from_net_str, localized("Amount to be unstaked from Net resources and used in REX purchase"))->required();
+      unstaketorex->add_option("from_cpu", from_cpu_str, localized("Amount to be unstaked from CPU resources and used in REX purchase"))->required();
       add_standard_transaction_options(unstaketorex, "owner@active");
       unstaketorex->set_callback([this] {
          fc::variant act_payload = fc::mutable_variant_object()
@@ -2263,7 +2262,7 @@ void get_account( const string& accountName, const string& coresym, bool json_fo
             auto& prods = obj["producers"].get_array();
             std::cout << "producers:";
             if ( !prods.empty() ) {
-               for ( int i = 0; i < prods.size(); ++i ) {
+               for ( size_t i = 0; i < prods.size(); ++i ) {
                   if ( i%3 == 0 ) {
                      std::cout << std::endl << indent;
                   }
