@@ -44,9 +44,9 @@ using boost::signals2::scoped_connection;
 
 // HACK TO EXPOSE LOGGER MAP
 
-namespace fc {
-   extern std::unordered_map<std::string,logger>& get_logger_map();
-}
+// namespace fc {
+//    extern std::unordered_map<std::string,logger>& get_logger_map();
+// }
 
 const fc::string logger_name("producer_plugin");
 fc::logger _log;
@@ -755,14 +755,14 @@ void producer_plugin::plugin_initialize(const boost::program_options::variables_
 
 void producer_plugin::plugin_startup()
 { try {
-   auto& logger_map = fc::get_logger_map();
-   if(logger_map.find(logger_name) != logger_map.end()) {
-      _log = logger_map[logger_name];
-   }
+   // auto& logger_map = fc::get_logger_map();
+   // if(logger_map.find(logger_name) != logger_map.end()) {
+   //    _log = logger_map[logger_name];
+   // }
 
-   if( logger_map.find(trx_trace_logger_name) != logger_map.end()) {
-      _trx_trace_log = logger_map[trx_trace_logger_name];
-   }
+   // if( logger_map.find(trx_trace_logger_name) != logger_map.end()) {
+   //    _trx_trace_log = logger_map[trx_trace_logger_name];
+   // }
 
    ilog("producer plugin:  plugin_startup() begin");
 

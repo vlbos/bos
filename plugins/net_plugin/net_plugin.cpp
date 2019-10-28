@@ -34,9 +34,9 @@
 
 using namespace eosio::chain::plugin_interface::compat;
 
-namespace fc {
-   extern std::unordered_map<std::string,logger>& get_logger_map();
-}
+// namespace fc {
+//    extern std::unordered_map<std::string,logger>& get_logger_map();
+// }
 
 namespace eosio {
    static appbase::abstract_plugin& _net_plugin = app().register_plugin<net_plugin>();
@@ -3694,8 +3694,8 @@ namespace eosio {
          connect( seed_node );
       }
 
-      if(fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
-         logger = fc::get_logger_map()[logger_name];
+      // if(fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
+      //    logger = fc::get_logger_map()[logger_name];
    }
 
    void net_plugin::plugin_shutdown() {
