@@ -1,7 +1,3 @@
-/**
- *  @file
- *  @copyright defined in eos/LICENSE
- */
 #pragma once
 
 #include <eosio/chain/database_utils.hpp>
@@ -20,9 +16,9 @@ namespace eosio { namespace chain {
       OBJECT_CTOR(table_id_object)
 
       id_type        id;
-      account_name   code;
-      scope_name     scope;
-      table_name     table;
+      account_name   code;  //< code should not be changed within a chainbase modifier lambda
+      scope_name     scope; //< scope should not be changed within a chainbase modifier lambda
+      table_name     table; //< table should not be changed within a chainbase modifier lambda
       account_name   payer;
       uint32_t       count = 0; /// the number of elements in the table
    };

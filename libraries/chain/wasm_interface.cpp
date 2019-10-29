@@ -11,6 +11,7 @@
 #include <eosio/chain/wasm_eosio_validation.hpp>
 #include <eosio/chain/wasm_eosio_injection.hpp>
 #include <eosio/chain/global_property_object.hpp>
+#include <eosio/chain/protocol_state_object.hpp>
 #include <eosio/chain/account_object.hpp>
 #include <fc/exception/exception.hpp>
 #include <fc/crypto/sha256.hpp>
@@ -50,17 +51,27 @@ namespace eosio { namespace chain {
       wasm_validations::wasm_binary_validation validator(control, module);
       validator.validate();
 
-      root_resolver resolver(true);
+      const auto& pso = control.db().get<protocol_state_object>();
+
+      root_resolver resolver( pso.whitelisted_intrinsics );
       LinkResult link_result = linkModule(module, resolver);
 
       //there are a couple opportunties for improvement here--
       //Easy: Cache the Module created here so it can be reused for instantiaion
       //Hard: Kick off instantiation in a separate thread at this location
 	 }
+
+   void wasm_interface::indicate_shutting_down() {
+      my->is_shutting_down = true;
+   }
+
    void wasm_interface::code_block_num_last_used(const digest_type& code_hash, const uint8_t& vm_type, const uint8_t& vm_version, const uint32_t& block_num) {
       my->code_block_num_last_used(code_hash, vm_type, vm_version, block_num);
    }
 
+   void wasm_interface::current_lib(const uint32_t lib) {
+      my->current_lib(lib);
+   }
 
    void wasm_interface::apply( const digest_type& code_hash, const uint8_t& vm_type, const uint8_t& vm_version, apply_context& context ) {
 #ifdef EOSIO_EOS_VM_OC_RUNTIME_ENABLED
@@ -155,6 +166,15 @@ class privileged_api : public context_aware_api {
        */
       void activate_feature( int64_t feature_name ) {
          EOS_ASSERT( false, unsupported_feature, "Unsupported Hardfork Detected" );
+      }
+
+      /**
+       *  Pre-activates the specified protocol feature.
+       *  Fails if the feature is unrecognized, disabled, or not allowed to be activated at the current time.
+       *  Also fails if the feature was already activated or pre-activated.
+       */
+      void preactivate_feature( const digest_type& feature_digest ) {
+         context.control.preactivate_feature( feature_digest );
       }
 
       /**
@@ -992,6 +1012,16 @@ class system_api : public context_aware_api {
          return static_cast<uint64_t>( context.trx_context.published.time_since_epoch().count() );
       }
 
+      /**
+       * Returns true if the specified protocol feature is activated, false if not.
+       */
+      bool is_feature_activated( const digest_type& feature_digest ) {
+         return context.control.is_protocol_feature_activated( feature_digest );
+      }
+
+      name get_sender() {
+         return context.get_sender();
+      }
 };
 
 constexpr size_t max_assert_message = 1024;
@@ -1024,8 +1054,23 @@ public:
 
    void eosio_assert_code( bool condition, uint64_t error_code ) {
       if( BOOST_UNLIKELY( !condition ) ) {
-         EOS_THROW( eosio_assert_code_exception,
-                    "assertion failure with error code: ${error_code}", ("error_code", error_code) );
+         if( error_code >= static_cast<uint64_t>(system_error_code::generic_system_error) ) {
+            restricted_error_code_exception e( FC_LOG_MESSAGE(
+                                                   error,
+                                                   "eosio_assert_code called with reserved error code: ${error_code}",
+                                                   ("error_code", error_code)
+            ) );
+            e.error_code = static_cast<uint64_t>(system_error_code::contract_restricted_error_code);
+            throw e;
+         } else {
+            eosio_assert_code_exception e( FC_LOG_MESSAGE(
+                                             error,
+                                             "assertion failure with error code: ${error_code}",
+                                             ("error_code", error_code)
+            ) );
+            e.error_code = error_code;
+            throw e;
+         }
       }
    }
 
@@ -1894,6 +1939,7 @@ REGISTER_INTRINSICS(privileged_api,
    (is_privileged,                    int(int64_t)                          )
    (set_privileged,                   void(int64_t, int)                    )
    (set_upgrade_parameters_packed, void(int, int)                           )
+   (preactivate_feature,              void(int)                             )
 );
 
 REGISTER_INJECTED_INTRINSICS(transaction_context,
@@ -1972,6 +2018,8 @@ REGISTER_INTRINSICS(permission_api,
 REGISTER_INTRINSICS(system_api,
    (current_time,          int64_t() )
    (publication_time,      int64_t() )
+   (is_feature_activated,  int(int)  )
+   (get_sender,            int64_t() )
 );
 
 REGISTER_INTRINSICS(context_free_system_api,

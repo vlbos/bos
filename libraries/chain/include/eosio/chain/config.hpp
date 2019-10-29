@@ -1,7 +1,3 @@
-/**
- *  @file
- *  @copyright defined in eos/LICENSE
- */
 #pragma once
 #include <eosio/chain/wasm_interface.hpp>
 #include <fc/time.hpp>
@@ -19,7 +15,7 @@ const static auto default_reversible_cache_size = 340*1024*1024ll;/// 1MB * 340 
 const static auto default_reversible_guard_size = 2*1024*1024ll;/// 1MB * 340 blocks based on 21 producer BFT delay
 
 const static auto default_state_dir_name     = "state";
-const static auto forkdb_filename            = "forkdb.dat";
+const static auto forkdb_filename            = "fork_db.dat";
 const static auto pbftdb_filename            = "pbftdb.dat";
 const static auto default_state_size            = 1*1024*1024*1024ll;
 const static auto default_state_guard_size      =    128*1024*1024ll;

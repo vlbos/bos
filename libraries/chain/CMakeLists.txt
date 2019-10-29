@@ -57,6 +57,7 @@ add_library( eosio_chain
              merkle.cpp
              name.cpp
              transaction.cpp
+             block.cpp
              block_header.cpp
              block_header_state.cpp
              block_state.cpp
@@ -70,6 +71,7 @@ add_library( eosio_chain
              transaction_context.cpp
              eosio_contract.cpp
              eosio_contract_abi.cpp
+             eosio_contract_abi_bin.cpp
              chain_config.cpp
              chain_id_type.cpp
              genesis_state.cpp
@@ -92,12 +94,18 @@ add_library( eosio_chain
              ${CHAIN_EOSVM_SOURCES}
 
 #             get_config.cpp
-#             global_property_object.cpp
 #
 #             contracts/chain_initializer.cpp
 
              trace.cpp
              transaction_metadata.cpp
+             protocol_state_object.cpp
+             protocol_feature_activation.cpp
+             protocol_feature_manager.cpp
+             producer_schedule.cpp
+             genesis_intrinsics.cpp
+             whitelisted_intrinsics.cpp
+             thread_utils.cpp
              platform_timer_accuracy.cpp
              ${PLATFORM_TIMER_IMPL}
              ${HEADERS}
@@ -136,7 +144,7 @@ install( TARGETS eosio_chain
 )
 install( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/eosio/chain/
       DESTINATION ${CMAKE_INSTALL_FULL_INCLUDEDIR}/eosio/chain
-      FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" PATTERN "webassembly" EXCLUDE
+      FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h" EXCLUDE
 )
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/eosio/chain/core_symbol.hpp DESTINATION ${CMAKE_INSTALL_FULL_INCLUDEDIR}/eosio/chain)
 #if(MSVC)

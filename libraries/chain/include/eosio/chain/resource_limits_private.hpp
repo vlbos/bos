@@ -133,8 +133,8 @@ namespace eosio { namespace chain { namespace resource_limits {
       OBJECT_CTOR(resource_limits_object)
 
       id_type id;
-      account_name owner;
-      bool pending = false;
+      account_name owner; //< owner should not be changed within a chainbase modifier lambda
+      bool pending = false; //< pending should not be changed within a chainbase modifier lambda
 
       int64_t net_weight = -1;
       int64_t cpu_weight = -1;
@@ -162,7 +162,7 @@ namespace eosio { namespace chain { namespace resource_limits {
       OBJECT_CTOR(resource_usage_object)
 
       id_type id;
-      account_name owner;
+      account_name owner; //< owner should not be changed within a chainbase modifier lambda
 
       usage_accumulator        net_usage;
       usage_accumulator        cpu_usage;
@@ -203,24 +203,6 @@ namespace eosio { namespace chain { namespace resource_limits {
       >
    >;
 
-      class gmr_config_object : public chainbase::object<gmr_config_object_type, gmr_config_object> {
-      OBJECT_CTOR(gmr_config_object);
-      id_type id;
-
-     
-      gmr_parameters res_parameters = { config::default_gmr_ram_limit,config::default_gmr_cpu_limit, config::default_gmr_net_limit};
- 
-   };
-
-   using gmr_config_index = chainbase::shared_multi_index_container<
-      gmr_config_object,
-      indexed_by<
-         ordered_unique<tag<by_id>, member<gmr_config_object, gmr_config_object::id_type, &gmr_config_object::id>>
-      >
-   >;
-
-
-
    class resource_limits_state_object : public chainbase::object<resource_limits_state_object_type, resource_limits_state_object> {
       OBJECT_CTOR(resource_limits_state_object);
       id_type id;
@@ -251,7 +233,7 @@ namespace eosio { namespace chain { namespace resource_limits {
        * real maximum block is less, this virtual number is only used for rate limiting users.
        *
        * It's lowest possible value is max_block_size * blocksize_average_window_ms / block_interval
-       * It's highest possible value is 1000 times its lowest possible value
+       * It's highest possible value is config::maximum_elastic_resource_multiplier (1000) times its lowest possible value
        *
        * This means that the most an account can consume during idle periods is 1000x the bandwidth
        * it is gauranteed under congestion.
@@ -283,8 +265,6 @@ CHAINBASE_SET_INDEX_TYPE(eosio::chain::resource_limits::resource_usage_object,  
 CHAINBASE_SET_INDEX_TYPE(eosio::chain::resource_limits::resource_limits_config_object, eosio::chain::resource_limits::resource_limits_config_index)
 CHAINBASE_SET_INDEX_TYPE(eosio::chain::resource_limits::resource_limits_state_object,  eosio::chain::resource_limits::resource_limits_state_index)
 
-CHAINBASE_SET_INDEX_TYPE(eosio::chain::resource_limits::gmr_config_object, eosio::chain::resource_limits::gmr_config_index)
-
 FC_REFLECT(eosio::chain::resource_limits::usage_accumulator, (last_ordinal)(value_ex)(consumed))
 
 // @ignore pending
@@ -292,5 +272,24 @@ FC_REFLECT(eosio::chain::resource_limits::resource_limits_object, (owner)(net_we
 FC_REFLECT(eosio::chain::resource_limits::resource_usage_object,  (owner)(net_usage)(cpu_usage)(ram_usage))
 FC_REFLECT(eosio::chain::resource_limits::resource_limits_config_object, (cpu_limit_parameters)(net_limit_parameters)(account_cpu_usage_average_window)(account_net_usage_average_window))
 FC_REFLECT(eosio::chain::resource_limits::resource_limits_state_object, (average_block_net_usage)(average_block_cpu_usage)(pending_net_usage)(pending_cpu_usage)(total_net_weight)(total_cpu_weight)(total_ram_bytes)(virtual_net_limit)(virtual_cpu_limit))
+
+CHAINBASE_SET_INDEX_TYPE(eosio::chain::resource_limits::gmr_config_object, eosio::chain::resource_limits::gmr_config_index)
+      class gmr_config_object : public chainbase::object<gmr_config_object_type, gmr_config_object> {
+      OBJECT_CTOR(gmr_config_object);
+      id_type id;
+
+     
+      gmr_parameters res_parameters = { config::default_gmr_ram_limit,config::default_gmr_cpu_limit, config::default_gmr_net_limit};
+ 
+   };
+
+   using gmr_config_index = chainbase::shared_multi_index_container<
+      gmr_config_object,
+      indexed_by<
+         ordered_unique<tag<by_id>, member<gmr_config_object, gmr_config_object::id_type, &gmr_config_object::id>>
+      >
+   >;
+
+
 FC_REFLECT(eosio::chain::resource_limits::gmr_config_object, (res_parameters))
 

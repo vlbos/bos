@@ -55,10 +55,12 @@ namespace eosio { namespace chain {
       fc::microseconds                           elapsed;
       uint64_t                                   net_usage = 0;
       bool                                       scheduled = false;
-      vector<action_trace>                       action_traces; ///< disposable
+      vector<action_trace>                       action_traces;
+      fc::optional<account_delta>                account_ram_delta;
 
       transaction_trace_ptr                      failed_dtrx_trace;
       fc::optional<fc::exception>                except;
+      fc::optional<uint64_t>                     error_code;
       std::exception_ptr                         except_ptr;
    };
 
@@ -74,4 +76,4 @@ FC_REFLECT( eosio::chain::action_trace,
 
 FC_REFLECT( eosio::chain::transaction_trace, (id)(block_num)(block_time)(producer_block_id)
                                              (receipt)(elapsed)(net_usage)(scheduled)
-                                             (action_traces)(failed_dtrx_trace)(except) )
+                                             (action_traces)(account_ram_delta)(failed_dtrx_trace)(except)(error_code) )
