@@ -1,11 +1,7 @@
-/**
- *  @file
- *  @copyright defined in eos/LICENSE
- */
 #pragma once
 #include <eosio/chain/block.hpp>
 #include <eosio/chain/types.hpp>
-#include <eosio/chain/pbft_database.hpp>
+#include <eosio/chain/pbft_database.hpp>///bos
 #include <chrono>
 
 namespace eosio {
@@ -27,7 +23,7 @@ namespace eosio {
       chain_id_type              chain_id; ///< used to identify chain
       fc::sha256                 node_id; ///< used to identify peers and prevent self-connect
       chain::public_key_type     key; ///< authentication key; may be a producer or peer key, or empty
-      tstamp                     time;
+      tstamp                     time{0};
       fc::sha256                 token; ///< digest of time to prove we own the private key of the key above
       chain::signature_type      sig; ///< signature for the digest
       string                     p2p_address;
@@ -37,7 +33,7 @@ namespace eosio {
       block_id_type              head_id;
       string                     os;
       string                     agent;
-      int16_t                    generation;
+      int16_t                    generation = 0;
    };
 
 
@@ -69,7 +65,7 @@ namespace eosio {
     case validation : return "invalid block";
     case authentication : return "authentication failure";
     case fatal_other : return "some other failure";
-    case benign_other : return "some other non-fatal condition";
+    case benign_other : return "some other non-fatal condition, possibly unknown block";
     default : return "some crazy reason";
     }
   }
@@ -132,7 +128,7 @@ namespace eosio {
       uint32_t start_block;
       uint32_t end_block;
    };
-
+///bos begin
    struct checkpoint_request_message {
        uint32_t start_block;
        uint32_t end_block;
@@ -150,7 +146,7 @@ struct request_p2p_message{
    struct compressed_pbft_message {
       std::vector<char> content;
    };
-
+///bos end
    using net_message = static_variant<handshake_message,
                                       chain_size_message,
                                       go_away_message,
@@ -160,7 +156,7 @@ struct request_p2p_message{
                                       sync_request_message,
                                       signed_block,       // which = 7
                                       packed_transaction, // which = 8
-                                      response_p2p_message,
+                                      response_p2p_message,//bos begin
                                       request_p2p_message,
                                       pbft_prepare,
                                       pbft_commit,
@@ -169,7 +165,7 @@ struct request_p2p_message{
                                       pbft_checkpoint,
                                       pbft_stable_checkpoint,
                                       checkpoint_request_message,
-                                      compressed_pbft_message>;
+                                      compressed_pbft_message>;///bos end
 
 } // namespace eosio
 
@@ -188,11 +184,12 @@ FC_REFLECT( eosio::time_message, (org)(rec)(xmt)(dst) )
 FC_REFLECT( eosio::notice_message, (known_trx)(known_blocks) )
 FC_REFLECT( eosio::request_message, (req_trx)(req_blocks) )
 FC_REFLECT( eosio::sync_request_message, (start_block)(end_block) )
+///bos
 FC_REFLECT( eosio::request_p2p_message, (discoverable) )
 FC_REFLECT( eosio::response_p2p_message, (discoverable)(p2p_peer_list) )
 FC_REFLECT( eosio::checkpoint_request_message, (start_block)(end_block) )
 FC_REFLECT( eosio::compressed_pbft_message, (content))
-
+///bos end
 
 /**
  *

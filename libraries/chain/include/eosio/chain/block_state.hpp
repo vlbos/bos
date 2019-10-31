@@ -63,7 +63,7 @@ namespace eosio { namespace chain {
 
       bool                                                validated = false;
       bool                                                in_current_chain = false;
-      bool                                                pbft_prepared = false;
+      bool                                                pbft_prepared = false;///bos
       bool                                                pbft_my_prepare = false;
       bool                                                pbft_watermark = false;
 

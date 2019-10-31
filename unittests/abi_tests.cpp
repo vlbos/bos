@@ -62,7 +62,7 @@ void verify_round_trip_conversion( const abi_serializer& abis, const type_name& 
 
 auto get_resolver(const abi_def& abi = abi_def())
 {
-   return [&abi](const account_name &name) -> fc::optional<abi_serializer> {
+   return [&abi](const account_name &name) -> optional<abi_serializer> {
       return abi_serializer(eosio_contract_abi(abi), max_serialization_time);
    };
 }
@@ -1951,8 +1951,8 @@ BOOST_AUTO_TEST_CASE(abi_type_redefine)
    }
    )=====";
 
-   auto is_type_exception = [](fc::exception const & e) -> bool { return e.to_detail_string().find("invalid type") != std::string::npos; };
-   BOOST_CHECK_EXCEPTION( abi_serializer abis(fc::json::from_string(repeat_abi).as<abi_def>(), max_serialization_time), invalid_type_inside_abi, is_type_exception );
+   auto is_type_exception = [](fc::exception const & e) -> bool { return e.to_detail_string().find("Circular reference in type account_name") != std::string::npos; };
+   BOOST_CHECK_EXCEPTION( abi_serializer abis(fc::json::from_string(repeat_abi).as<abi_def>(), max_serialization_time), abi_circular_def_exception, is_type_exception );
 
 } FC_LOG_AND_RETHROW() }
 
@@ -2269,7 +2269,7 @@ BOOST_AUTO_TEST_CASE(variants)
       // json -> variant -> abi_def -> bin
       auto bin = fc::raw::pack(fc::json::from_string(variant_abi).as<abi_def>());
       // bin -> abi_def -> variant -> abi_def
-      abi_serializer abis(fc::variant(fc::raw::unpack<abi_def>(bin)).as<abi_def>(), max_serialization_time );
+      abi_serializer abis(variant(fc::raw::unpack<abi_def>(bin)).as<abi_def>(), max_serialization_time );
 
       // duplicate variant definition detected
       BOOST_CHECK_THROW( abi_serializer( fc::json::from_string(duplicate_variant_abi).as<abi_def>(), max_serialization_time ), duplicate_abi_variant_def_exception );
@@ -2297,6 +2297,57 @@ BOOST_AUTO_TEST_CASE(variants)
       verify_round_trip_conversion(abis, "v1", R"(["int16",4])", "020400");
       verify_round_trip_conversion(abis, "v2", R"(["foo",{"i0":5,"i1":6}])", "000506");
       verify_round_trip_conversion(abis, "v2", R"(["bar",{"i0":5,"i1":6}])", "010506");
+   } FC_LOG_AND_RETHROW()
+}
+
+BOOST_AUTO_TEST_CASE(aliased_variants)
+{
+   using eosio::testing::fc_exception_message_starts_with;
+
+   auto aliased_variant = R"({
+      "version": "eosio::abi/1.1",
+      "types": [
+         { "new_type_name": "foo", "type": "foo_variant" }
+      ],
+      "variants": [
+         {"name": "foo_variant", "types": ["int8", "string"]}
+      ],
+   })";
+
+   try {
+      // round-trip abi through multiple formats
+      // json -> variant -> abi_def -> bin
+      auto bin = fc::raw::pack(fc::json::from_string(aliased_variant).as<abi_def>());
+      // bin -> abi_def -> variant -> abi_def
+      abi_serializer abis(variant(fc::raw::unpack<abi_def>(bin)).as<abi_def>(), max_serialization_time );
+
+      verify_round_trip_conversion(abis, "foo", R"(["int8",21])", "0015");
+   } FC_LOG_AND_RETHROW()
+}
+
+BOOST_AUTO_TEST_CASE(variant_of_aliases)
+{
+   using eosio::testing::fc_exception_message_starts_with;
+
+   auto aliased_variant = R"({
+      "version": "eosio::abi/1.1",
+      "types": [
+         { "new_type_name": "foo_0", "type": "int8" },
+         { "new_type_name": "foo_1", "type": "string" }
+      ],
+      "variants": [
+         {"name": "foo", "types": ["foo_0", "foo_1"]}
+      ],
+   })";
+
+   try {
+      // round-trip abi through multiple formats
+      // json -> variant -> abi_def -> bin
+      auto bin = fc::raw::pack(fc::json::from_string(aliased_variant).as<abi_def>());
+      // bin -> abi_def -> variant -> abi_def
+      abi_serializer abis(variant(fc::raw::unpack<abi_def>(bin)).as<abi_def>(), max_serialization_time );
+
+      verify_round_trip_conversion(abis, "foo", R"(["foo_0",21])", "0015");
    } FC_LOG_AND_RETHROW()
 }
 
@@ -2450,6 +2501,30 @@ BOOST_AUTO_TEST_CASE(abi_serialize_json_mismatching_type)
                              pack_exception, fc_exception_message_is("Unexpected input encountered while processing struct 's2.f0'") );
 
       verify_round_trip_conversion(abis, "s2", R"({"f0":{"i0":1},"i1":2})", "0102");
+
+   } FC_LOG_AND_RETHROW()
+}
+
+// it is a bit odd to have an empty name for a field, but json seems to allow it
+BOOST_AUTO_TEST_CASE(abi_serialize_json_empty_name)
+{
+   using eosio::testing::fc_exception_message_is;
+
+   auto abi = R"({
+      "version": "eosio::abi/1.0",
+      "structs": [
+         {"name": "s1", "base": "", "fields": [
+            {"name": "", "type": "int8"},
+         ]}
+      ],
+   })";
+
+   try {
+      abi_serializer abis( fc::json::from_string(abi).as<abi_def>(), max_serialization_time );
+
+      auto bin = abis.variant_to_binary("s1", fc::json::from_string(R"({"":1})"), max_serialization_time);
+
+      verify_round_trip_conversion(abis, "s1", R"({"":1})", "01");
 
    } FC_LOG_AND_RETHROW()
 }
@@ -2688,6 +2763,26 @@ BOOST_AUTO_TEST_CASE(abi_deserialize_detailed_error_messages)
 
       BOOST_CHECK_EXCEPTION( abis.binary_to_variant("s5", fc::variant("00010101").as<bytes>(), max_serialization_time),
                              unpack_exception, fc_exception_message_is("Stream unexpectedly ended; unable to unpack field 'i1' of struct 's5.f1[0].<variant(1)=s1>'") );
+
+   } FC_LOG_AND_RETHROW()
+}
+
+BOOST_AUTO_TEST_CASE(serialize_optional_struct_type)
+{
+   auto abi = R"({
+      "version": "eosio::abi/1.0",
+      "structs": [
+         {"name": "s", "base": "", "fields": [
+            {"name": "i0", "type": "int8"}
+         ]},
+      ],
+   })";
+
+   try {
+      abi_serializer abis( fc::json::from_string(abi).as<abi_def>(), max_serialization_time );
+
+      verify_round_trip_conversion(abis, "s?", R"({"i0":5})", "0105");
+      verify_round_trip_conversion(abis, "s?", R"(null)", "00");
 
    } FC_LOG_AND_RETHROW()
 }

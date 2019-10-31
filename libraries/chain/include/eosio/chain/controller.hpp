@@ -73,6 +73,7 @@ namespace eosio { namespace chain {
 
    // *bos end*
 
+   using signature_provider_type = std::function<chain::signature_type(chain::digest_type)>;  ///bos
 
    class controller {
       public:
@@ -148,7 +149,7 @@ namespace eosio { namespace chain {
           *
           *  Will only activate protocol features that have been pre-activated.
           */
-         void start_block( block_timestamp_type time = block_timestamp_type(), uint16_t confirm_block_count = 0 );
+         void start_block( block_timestamp_type time = block_timestamp_type(), uint16_t confirm_block_count = 0, std::function<signature_type(digest_type)> signer = nullptr );///bos
 
          /**
           * Starts a new pending block session upon which new transactions can
@@ -193,6 +194,11 @@ namespace eosio { namespace chain {
 
          const chainbase::database& db()const;
 
+
+
+
+         const fork_database& fork_db()const;
+		 ///bos begin
          void pbft_commit_local( const block_id_type& id );
 
          bool pending_pbft_lib();
@@ -202,13 +208,9 @@ namespace eosio { namespace chain {
          void set_pbft_latest_checkpoint( const block_id_type& id );
          uint32_t last_stable_checkpoint_block_num()const;
          block_id_type last_stable_checkpoint_block_id()const;
-
-
-         const fork_database& fork_db()const;
-
          std::map<chain::public_key_type, signature_provider_type> my_signature_providers()const;
          void set_my_signature_providers(std::map<chain::public_key_type, signature_provider_type> msp);
-
+		 ///bos end
 
          const account_object&                 get_account( account_name n )const;
          const global_property_object&         get_global_properties()const;
@@ -260,6 +262,8 @@ namespace eosio { namespace chain {
          const producer_authority_schedule&    active_producers()const;
          const producer_authority_schedule&    pending_producers()const;
          optional<producer_authority_schedule> proposed_producers()const;
+		 
+		 std::function<signature_type(digest_type)> pending_producer_signer()const;///bos
 
          uint32_t last_irreversible_block_num() const;
          block_id_type last_irreversible_block_id() const;
@@ -332,6 +336,7 @@ namespace eosio { namespace chain {
          uint32_t get_greylist_limit()const;
          void add_to_ram_correction( account_name account, uint64_t ram_bytes );
          bool all_subjective_mitigations_disabled()const;
+		 ///bos begin
          path state_dir()const;
          path blocks_dir()const;
          producer_schedule_type initial_schedule()const;
@@ -344,7 +349,14 @@ namespace eosio { namespace chain {
          void reset_pbft_my_prepare();
          void reset_pbft_prepared();
          void maybe_switch_forks();
-
+		 
+	     const upgrade_property_object& get_upgrade_properties()const;
+         const global_property3_object& get_pbft_properties()const;
+         bool is_pbft_enabled()const;
+         bool under_maintenance()const;
+         void set_upo(uint32_t target_block_num);
+		 
+		 ///bos end
 #if defined(EOSIO_EOS_VM_RUNTIME_ENABLED) || defined(EOSIO_EOS_VM_JIT_RUNTIME_ENABLED)
          vm::wasm_allocator&  get_wasm_allocator();
 #endif
@@ -359,11 +371,7 @@ namespace eosio { namespace chain {
          signal<void(std::tuple<const transaction_trace_ptr&, const signed_transaction&>)> applied_transaction;
          signal<void(const int&)>                      bad_alloc;
 
-         const upgrade_property_object& get_upgrade_properties()const;
-         const global_property3_object& get_pbft_properties()const;
-         bool is_pbft_enabled()const;
-         bool under_maintenance()const;
-         void set_upo(uint32_t target_block_num);
+
 
          /*
          signal<void()>                                  pre_apply_block;

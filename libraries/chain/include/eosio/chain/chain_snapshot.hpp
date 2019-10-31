@@ -33,6 +33,7 @@ struct chain_snapshot_header {
    }
 };
 
+///bos
 struct batch_pbft_snapshot_migrated{};
 
 struct batch_pbft_enabled{};

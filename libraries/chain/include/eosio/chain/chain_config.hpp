@@ -121,13 +121,12 @@ struct chain_config3 {
     void validate()const;
 };
 
-
+// *bos*
 struct guaranteed_minimum_resources {
    uint64_t ram_byte;
    uint64_t cpu_us;
    uint64_t net_byte;
 };
-// *bos*
 } } // namespace eosio::chain
 
 FC_REFLECT(eosio::chain::chain_config,

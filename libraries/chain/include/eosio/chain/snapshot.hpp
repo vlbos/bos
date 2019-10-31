@@ -2,6 +2,7 @@
 
 #include <eosio/chain/database_utils.hpp>
 #include <eosio/chain/exceptions.hpp>
+#include <eosio/chain/block_header_state.hpp>  ///bos
 #include <fc/variant_object.hpp>
 #include <boost/core/demangle.hpp>
 #include <ostream>
@@ -214,7 +215,7 @@ namespace eosio { namespace chain {
 
          T& data;
       };
-///bos
+///bos  begin
        template<typename T>
        struct snapshot_pbft_migrate_row_reader : abstract_snapshot_row_reader {
          explicit snapshot_pbft_migrate_row_reader( T& data )
@@ -254,15 +255,17 @@ namespace eosio { namespace chain {
          T& data;
        };
 
+  template<typename T>
+       snapshot_pbft_migrate_row_reader<T> make_pbft_migrate_row_reader( T& data ) {
+           return snapshot_pbft_migrate_row_reader<T>(data);
+       }
+	   ///bos end
       template<typename T>
       snapshot_row_reader<T> make_row_reader( T& data ) {
          return snapshot_row_reader<T>(data);
       }
 
-       template<typename T>
-       snapshot_pbft_migrate_row_reader<T> make_pbft_migrate_row_reader( T& data ) {
-           return snapshot_pbft_migrate_row_reader<T>(data);
-       }
+     
    }
 
    class snapshot_reader {

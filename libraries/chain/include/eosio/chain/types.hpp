@@ -162,7 +162,7 @@ namespace eosio { namespace chain {
       index_double_object_type,
       index_long_double_object_type,
       global_property_object_type,
-      global_property2_object_type,
+      global_property2_object_type,  ///< Defined by bos
       dynamic_global_property_object_type,
       block_summary_object_type,
       transaction_object_type,
@@ -190,9 +190,9 @@ namespace eosio { namespace chain {
       reversible_block_object_type,
 	  protocol_state_object_type,
 	  account_ram_correction_object_type,
-      upgrade_property_object_type,
+      upgrade_property_object_type,///< Defined by bos
       
-      global_property3_object_type,
+      global_property3_object_type,///< Defined by bos
 	  code_object_type,
       database_header_object_type,
       OBJECT_TYPE_COUNT ///< Sentry value which contains the number of different object types

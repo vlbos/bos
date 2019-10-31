@@ -36,7 +36,7 @@ namespace eosio { namespace chain {
    }
 
    pending_block_header_state  block_header_state::next( block_timestamp_type when,
-                                                         uint16_t num_prev_blocks_to_confirm )const
+                                                         uint16_t num_prev_blocks_to_confirm ,bool pbft_enabled)const
    {
       pending_block_header_state result;
 
@@ -59,7 +59,11 @@ namespace eosio { namespace chain {
       result.block_num                                       = block_num + 1;
       result.previous                                        = id;
       result.timestamp                                       = when;
-      result.confirmed                                       = num_prev_blocks_to_confirm;
+      if (pbft_enabled) {
+        header.confirmed = 0;
+      } else {
+        result.confirmed = num_prev_blocks_to_confirm;
+      }
       result.active_schedule_version                         = active_schedule.version;
       result.prev_activated_protocol_features                = activated_protocol_features;
 
@@ -76,19 +80,22 @@ namespace eosio { namespace chain {
       auto num_active_producers = active_schedule.producers.size();
       uint32_t required_confs = (uint32_t)(num_active_producers * 2 / 3) + 1;
 
-      if( confirm_count.size() < config::maximum_tracked_dpos_confirmations ) {
-         result.confirm_count.reserve( confirm_count.size() + 1 );
-         result.confirm_count  = confirm_count;
-         result.confirm_count.resize( confirm_count.size() + 1 );
-         result.confirm_count.back() = (uint8_t)required_confs;
-      } else {
-         result.confirm_count.resize( confirm_count.size() );
-         memcpy( &result.confirm_count[0], &confirm_count[1], confirm_count.size() - 1 );
-         result.confirm_count.back() = (uint8_t)required_confs;
-      }
-
       auto new_dpos_proposed_irreversible_blocknum = dpos_proposed_irreversible_blocknum;
 
+      /// bos
+      if (!pbft_enabled) {
+        if (confirm_count.size() < config::maximum_tracked_dpos_confirmations) {
+          result.confirm_count.reserve(confirm_count.size() + 1);
+          result.confirm_count = confirm_count;
+          result.confirm_count.resize(confirm_count.size() + 1);
+          result.confirm_count.back() = (uint8_t)required_confs;
+        } else {
+          result.confirm_count.resize(confirm_count.size());
+          memcpy(&result.confirm_count[0], &confirm_count[1],
+                 confirm_count.size() - 1);
+          result.confirm_count.back() = (uint8_t)required_confs;
+        }
+      
       int32_t i = (int32_t)(result.confirm_count.size() - 1);
       uint32_t blocks_to_confirm = num_prev_blocks_to_confirm + 1; /// confirm the head block too
       while( i >= 0 && blocks_to_confirm ) {
@@ -112,14 +119,32 @@ namespace eosio { namespace chain {
         --i;
         --blocks_to_confirm;
       }
+      }
 
-      result.dpos_proposed_irreversible_blocknum   = new_dpos_proposed_irreversible_blocknum;
-      result.dpos_irreversible_blocknum            = calc_dpos_last_irreversible( proauth.producer_name );
+    result.pbft_stable_checkpoint_blocknum       = pbft_stable_checkpoint_blocknum;
+
+    /// bos
+    if (pbft_enabled) {
+      result.dpos_irreversible_blocknum = dpos_irreversible_blocknum;
+    } else {
+      //      result.producer_to_last_implied_irb[prokey.producer_name] =
+      //      result.dpos_proposed_irreversible_blocknum;
+      //      result.dpos_irreversible_blocknum =
+      //      result.calc_dpos_last_irreversible();
+      result.dpos_proposed_irreversible_blocknum =          new_dpos_proposed_irreversible_blocknum;
+      result.dpos_irreversible_blocknum =          calc_dpos_last_irreversible(proauth.producer_name);
+    }
 
       result.prev_pending_schedule                 = pending_schedule;
 
-      if( pending_schedule.schedule.producers.size() &&
-          result.dpos_irreversible_blocknum >= pending_schedule.schedule_lib_num )
+      // if( pending_schedule.schedule.producers.size() &&
+      //     result.dpos_irreversible_blocknum >= pending_schedule.schedule_lib_num )
+      bool should_promote_pending = pending_schedule.producers.size();
+      if ( !pbft_enabled ) {
+          should_promote_pending = should_promote_pending && dpos_irreversible_blocknum >= pending_schedule_lib_num;
+      }
+
+      if (should_promote_pending)
       {
          result.active_schedule = pending_schedule.schedule;
 
@@ -133,7 +158,12 @@ namespace eosio { namespace chain {
                if( existing != producer_to_last_produced.end() ) {
                   new_producer_to_last_produced[pro.producer_name] = existing->second;
                } else {
+			    //TODO: max of bft and dpos lib
+               if (pbft_enabled) {
+                   new_producer_to_last_produced[pro.producer_name] = bft_irreversible_blocknum;
+               } else {
                   new_producer_to_last_produced[pro.producer_name] = result.dpos_irreversible_blocknum;
+				  }
                }
             }
          }
@@ -151,7 +181,12 @@ namespace eosio { namespace chain {
                if( existing != producer_to_last_implied_irb.end() ) {
                   new_producer_to_last_implied_irb[pro.producer_name] = existing->second;
                } else {
+			   //TODO: max of bft and dpos lib
+               if (pbft_enabled) {
+                   new_producer_to_last_implied_irb[pro.producer_name] = bft_irreversible_blocknum;
+               } else {
                   new_producer_to_last_implied_irb[pro.producer_name] = result.dpos_irreversible_blocknum;
+				  }
                }
             }
          }
@@ -187,6 +222,8 @@ namespace eosio { namespace chain {
       h.transaction_mroot = transaction_mroot;
       h.action_mroot      = action_mroot;
       h.schedule_version  = active_schedule_version;
+///bos
+//   result.header.header_extensions  = h.header_extensions;
 
       if( new_protocol_feature_activations.size() > 0 ) {
          emplace_extension(
@@ -384,9 +421,9 @@ namespace eosio { namespace chain {
                         const std::function<void( block_timestamp_type,
                                                   const flat_set<digest_type>&,
                                                   const vector<digest_type>& )>& validator,
-                        bool skip_validate_signee )const
+                        bool skip_validate_signee,bool pbft_enabled )const
    {
-      return next( h.timestamp, h.confirmed ).finish_next( h, std::move(_additional_signatures), pfs, validator, skip_validate_signee );
+      return next( h.timestamp, h.confirmed ,pbft_enabled).finish_next( h, std::move(_additional_signatures), pfs, validator, skip_validate_signee );
    }
 
    digest_type   block_header_state::sig_digest()const {

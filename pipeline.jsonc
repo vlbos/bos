@@ -1,14 +1,38 @@
 {
-    "eosio-lrt":
+    "eos-multiversion-tests":
     {
-        "pipeline-branch": "legacy-os"
+        "environment":
+        {
+            "IMAGE_TAG": "_1-8-0-rc2"
+        },
+        "configuration":
+        [
+            "170=v1.7.0"
+        ]
     },
-    "eosio-nightly-builds":
+    "eosio-docker-builds":
     {
-        "pipeline-branch": "legacy-os"
+        "environment":
+        {
+            "BUILDER_TAG": "v2.0.0"
+        }
     },
-    "eosio-base-images":
+    "eosio-sync-tests":
     {
-        "pipeline-branch": "release/1.6.x"
+        "environment":
+        {
+            "SKIP_PRE_V180": "true",
+            "SKIP_V180": "true",
+            "SKIP_V200": "false"
+        }
+    },
+    "eosio-replay-tests":
+    {
+        "environment":
+        {
+            "SKIP_PRE_V180": "true",
+            "SKIP_V180": "true",
+            "SKIP_V200": "false"
+        }
     }
 }

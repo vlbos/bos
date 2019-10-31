@@ -42,10 +42,10 @@ using controller_index_set = index_set<
    account_ram_correction_index,
    global_property_multi_index,
    protocol_state_multi_index,
-   global_property2_multi_index,
+   global_property2_multi_index,///bos
    dynamic_global_property_multi_index,
-   upgrade_property_multi_index,
-   global_property3_multi_index,
+   upgrade_property_multi_index,///bos
+   global_property3_multi_index,///bos
    block_summary_multi_index,
    transaction_multi_index,
    generated_transaction_multi_index,
@@ -157,6 +157,8 @@ struct pending_state {
 
    optional<block_id_type>            _producer_block_id;
 
+
+
    /** @pre _block_stage cannot hold completed_block alternative */
    const pending_block_header_state& get_pending_block_header_state()const {
       if( _block_stage.contains<building_block>() )
@@ -211,6 +213,8 @@ struct pending_state {
       return (activated_features.find( feature_digest ) != activated_features.end());
    }
 
+std::function<signature_type(digest_type)> _signer;///bos
+
    void push() {
       _db_session.push();
    }
@@ -222,12 +226,14 @@ struct controller_impl {
    chainbase::database            reversible_blocks; ///< a special database to persist blocks that have successfully been applied but are still reversible
    block_log                      blog;
    optional<pending_state>        pending;
+   ///bos begin
    bool                           pbft_enabled = false;
    bool                           pbft_upgrading = false;
    optional<block_id_type>        pending_pbft_lib;
    optional<block_id_type>        pending_pbft_checkpoint;
    block_state_ptr                pbft_prepared;
    block_state_ptr                my_prepare;
+   ///bos end
    block_state_ptr                head;
    fork_database                  fork_db;
    wasm_interface                 wasmif;
@@ -235,6 +241,7 @@ struct controller_impl {
    authorization_manager          authorization;
    protocol_feature_manager       protocol_features;
    controller::config             conf;
+   controller::config             multisig_blacklists;///<  multisig blacklists in memory  bos
    const chain_id_type            chain_id; // read by thread_pool threads, value will not be changed
    optional<fc::time_point>       replay_head_time;
    db_read_mode                   read_mode = db_read_mode::SPECULATIVE;
@@ -544,7 +551,12 @@ struct controller_impl {
             EOS_ASSERT( lib_num > 0, snapshot_exception,
                         "Snapshot indicates controller head at block number 0, but that is not allowed. "
                         "Snapshot is invalid." );
-            blog.reset( chain_id, lib_num + 1 );
+            ///bos begin
+            auto reset_block_num = head->block_num + 1;
+            if (pbft_enabled) reset_block_num = head->pbft_stable_checkpoint_blocknum;
+            blog.reset( chain_id reset_block_num );
+            //bos end
+            // blog.reset( chain_id, lib_num + 1 );
          }
          const auto hash = calculate_integrity_hash();
          ilog( "database initialized with hash: ${hash}", ("hash", hash) );
@@ -653,6 +665,8 @@ struct controller_impl {
          });
       }
 
+     update_pbft_status();  //compatiable for snapshot integrity test////bos
+	 
       // At this point head != nullptr && fork_db.head() != nullptr && fork_db.root() != nullptr.
       // Furthermore, fork_db.root()->block_num <= lib_num.
       // Also, even though blog.head() may still be nullptr, blog.first_block_num() is guaranteed to be lib_num + 1.
@@ -756,7 +770,7 @@ struct controller_impl {
 	  
 	        //*bos begin*
       merge_msig_blacklist_into_conf();
-      //*bos end*
+     
    }
 
 ///bos
@@ -797,7 +811,8 @@ struct controller_impl {
           db.create<global_property3_object>([](auto&){});
       }
    }
-
+ //*bos end*
+ 
    ~controller_impl() {
       thread_pool.stop();
       pending.reset();
@@ -882,11 +897,27 @@ struct controller_impl {
       snapshot->write_section<chain_snapshot_header>([this]( auto &section ){
          section.add_row(chain_snapshot_header(), db);
       });
-
-      snapshot->write_section<block_state>([this]( auto &section ){
-         section.template add_row<block_header_state>(*fork_db.head(), db);
+///bos begin
+      snapshot->write_section<genesis_state>([this]( auto &section ){
+         section.add_row(conf.genesis, db);
       });
 
+      snapshot->write_section<batch_pbft_snapshot_migrated>([]( auto &section ){});
+
+      auto lscb = fork_db.get_block_in_current_chain_by_num(fork_db.head()->pbft_stable_checkpoint_blocknum);
+      if (pbft_enabled && lscb) {
+         snapshot->write_section<batch_pbft_enabled>([]( auto &section ) {});
+
+         snapshot->write_section<batch_pbft_lscb_branch>([this, &lscb](auto &section) {
+            auto bss = fork_db.fetch_branch_from(fork_db.head()->id, lscb->id).first;
+            section.template add_row<branch_type>(bss, db);
+         });
+      } else {
+         snapshot->write_section<block_state>([this]( auto &section ) {
+            section.template add_row<block_header_state>(*fork_db.head(), db);
+         });
+      }
+///bos end
       controller_index_set::walk_indices([this, &snapshot]( auto utils ){
          using value_t = typename decltype(utils)::index_t::value_type;
 
@@ -933,7 +964,7 @@ struct controller_impl {
          header.validate();
       });
 		
-	  ///bos
+	  ///bos  begin
       bool migrated = snapshot->has_section<batch_pbft_snapshot_migrated>();
       auto upgraded = snapshot->has_section<batch_pbft_enabled>();
       if (migrated && upgraded) {
@@ -957,6 +988,7 @@ struct controller_impl {
                head = fork_db.head();
             });
       } else {
+	  		///bos todo
          // snapshot->read_section<block_state>([this, &migrated](snapshot_reader::section_reader &section) {
          //    block_header_state head_header_state;
          //    if (migrated) {
@@ -1047,15 +1079,16 @@ struct controller_impl {
                return; // early out to avoid default processing
             }
          }
-
-         snapshot->read_section<value_t>([this]( auto& section ) {
-            bool more = !section.empty();
-            while(more) {
-               decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
-                  more = section.read_row(row, db);
-               });
-            }
-         });
+         if(snapshot->has_section<value_t>()){///bos
+            snapshot->read_section<value_t>([this]( auto& section ) {
+               bool more = !section.empty();
+               while(more) {
+                  decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
+                     more = section.read_row(row, db);
+                  });
+               }
+            });
+         }
       });
 
       read_contract_tables_from_snapshot(snapshot);
@@ -1179,10 +1212,10 @@ struct controller_impl {
       });
 
 
-      // *bos end*
+     
 
       db.create<global_property3_object>([](auto&) {});
-
+ // *bos end*
      
    }
 
@@ -1334,7 +1367,7 @@ struct controller_impl {
          if (add_to_fork_db) {
             pending->_pending_block_state->validated = true;
 
-            auto new_bsp = fork_db.add(pending->_pending_block_state, true, pbft_enabled);
+            auto new_bsp = fork_db.add(pending->_pending_block_state, true, pbft_enabled);////bos
             emit(self.accepted_block_header, pending->_pending_block_state);
 
             head = fork_db.head();
@@ -1347,11 +1380,11 @@ struct controller_impl {
                ubo.set_block( pending->_pending_block_state->block );
             });
          }
-
+///bos begin
          if (pbft_enabled && pending->_pending_block_state->pbft_watermark) {
             if (auto bs = fork_db.get_block(pending->_pending_block_state->id)) fork_db.mark_as_pbft_watermark(bs);
          }
-
+///bos end
          emit( self.accepted_block, pending->_pending_block_state );
       } catch (...) {
          // dont bother resetting pending, instead abort the block
@@ -1788,13 +1821,13 @@ struct controller_impl {
                      uint16_t confirm_block_count,
                      const vector<digest_type>& new_protocol_feature_activations,
                      controller::block_status s,
-                     const optional<block_id_type>& producer_block_id )
+                     const optional<block_id_type>& producer_block_id , 
+					 std::function<signature_type(digest_type)> signer = nullptr)///bos
    {
       EOS_ASSERT( !pending, block_validate_exception, "pending block already exists" );
 
-      set_pbft_lib();
-      set_pbft_lscb();
-
+      set_pbft_lib();///bos
+      set_pbft_lscb();///bos
       auto guard_pending = fc::make_scoped_exit([this, head_block_num=head->block_num](){
          protocol_features.popped_blocks_to( head_block_num );
          pending.reset();
@@ -1809,9 +1842,10 @@ struct controller_impl {
          pending.emplace( maybe_session(), *head, when, confirm_block_count, new_protocol_feature_activations );
       }
 
-      update_pbft_status();
+      update_pbft_status();///bos
 
       pending->_block_status = s;
+      pending->_signer = signer;///bos
       pending->_producer_block_id = producer_block_id;
 
       auto& bb = pending->_block_stage.get<building_block>();
@@ -1887,6 +1921,8 @@ struct controller_impl {
          }
   
          const auto& gpo = db.get<global_property_object>();
+///bos begin
+         auto lib_num = std::max(pending->_pending_block_state->dpos_irreversible_blocknum, pending->_pending_block_state->bft_irreversible_blocknum);
 		   if (pbft_enabled && gpo.proposed_schedule_block_num) {
 		              auto bs = fork_db.get_block_in_current_chain_by_num(*gpo.proposed_schedule_block_num);
              if (bs) fork_db.mark_as_pbft_watermark(bs);
@@ -1922,10 +1958,11 @@ struct controller_impl {
                         producer_schedule_exception, "wrong producer schedule version specified" );
 
             pending->_block_stage.get<building_block>()._new_pending_producer_schedule = producer_authority_schedule::from_shared(gpo.proposed_schedule);
- if (pbft_enabled) {
-                     pending->_pending_block_state->pbft_watermark = true;
-                 }
-}
+            if (pbft_enabled) {
+              pending->_pending_block_state->pbft_watermark = true;
+            }
+ }
+ ///bos end
             db.modify( gpo, [&]( auto& gp ) {
                gp.proposed_schedule_block_num = optional<block_num_type>();
                gp.proposed_schedule.version=0;
@@ -1973,13 +2010,20 @@ struct controller_impl {
       // Update resource limits:
       resource_limits.process_account_limit_updates();
       const auto& chain_config = self.get_global_properties().configuration;
+      const auto& gmr = self.get_global_properties2().gmr;//guaranteed minimum resources  which is abbreviated  gmr  ///bos
       uint64_t CPU_TARGET = EOS_PERCENT(chain_config.max_block_cpu_usage, chain_config.target_block_cpu_usage_pct);
       resource_limits.set_block_parameters(
          { CPU_TARGET, chain_config.max_block_cpu_usage, config::block_cpu_usage_average_window_ms / config::block_interval_ms, config::maximum_elastic_resource_multiplier, {99, 100}, {1000, 999}},
          {EOS_PERCENT(chain_config.max_block_net_usage, chain_config.target_block_net_usage_pct), chain_config.max_block_net_usage, config::block_size_average_window_ms / config::block_interval_ms, config::maximum_elastic_resource_multiplier, {99, 100}, {1000, 999}}
       );
+	  ///bos begin
+	  resource_limits.set_gmr_parameters(
+         {  gmr.ram_byte, gmr.cpu_us,gmr.net_byte}
+      );
+	  ///bos end
       resource_limits.process_block_usage(pbhs.block_num);
 
+ set_ext_merkle();///bos
       auto& bb = pending->_block_stage.get<building_block>();
 
       // Create (unsigned) block:
@@ -2163,7 +2207,17 @@ struct controller_impl {
                }
             }
          }
+///bos begin
+ pending->_pending_block_state->block->header_extensions = b->header_extensions;
 
+         extensions_type pending_block_extensions;
+         for ( const auto& extn: b->block_extensions) {
+            if (extn.first != static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint)) {
+               pending_block_extensions.emplace_back(extn);
+            }
+         }
+///bos end
+         pending->_pending_block_state->block->block_extensions = pending_block_extensions;
          transaction_trace_ptr trace;
 
          size_t packed_idx = 0;
@@ -2240,9 +2294,9 @@ struct controller_impl {
       EOS_ASSERT( prev, unlinkable_block_exception,
                   "unlinkable block ${id}", ("id", id)("previous", b->previous) );
 
-      auto pbft = pbft_enabled;
+      auto pbft = pbft_enabled; ///bos 
 
-      return async_thread_pool( thread_pool.get_executor(), [b, prev, control=this,pbft]() {
+      return async_thread_pool( thread_pool.get_executor(), [b, prev, control=this,pbft]() {///bos
          const bool skip_validate_signee = false;
          return std::make_shared<block_state>(
                         *prev,
@@ -2252,7 +2306,7 @@ struct controller_impl {
                                    const flat_set<digest_type>& cur_features,
                                    const vector<digest_type>& new_features )
                         { control->check_protocol_features( timestamp, cur_features, new_features ); },
-                        skip_validate_signee,pbft
+                        skip_validate_signee,pbft///bos
          );
       } );
    }
@@ -2272,14 +2326,14 @@ struct controller_impl {
 
          emit( self.pre_accepted_block, b );
 
-         fork_db.add( bsp ,pbft_enabled);
+         fork_db.add( bsp ,pbft_enabled);///bos
 
          if (conf.trusted_producers.count(b->producer)) {
             trusted_producer_light_validation = true;
          };
 
          emit( self.accepted_block_header, bsp );
-         set_pbft_lib();
+         set_pbft_lib();///bos
 
          if( read_mode != db_read_mode::IRREVERSIBLE ) {
             maybe_switch_forks( fork_db.pending_head(), s, forked_branch_cb, trx_lookup );
@@ -2287,7 +2341,7 @@ struct controller_impl {
             log_irreversible();
          }
 
-         set_pbft_lscb();
+         set_pbft_lscb();///bos
       } FC_LOG_AND_RETHROW( )
    }
 
@@ -2297,8 +2351,8 @@ struct controller_impl {
 
       EOS_ASSERT(!pending, block_validate_exception, "it is not valid to push a block when there is a pending block");
 
-      set_pbft_lib();
-      set_pbft_lscb();
+      set_pbft_lib();///bos
+      set_pbft_lscb();///bos
 
       try {
          EOS_ASSERT( b, block_validate_exception, "trying to push empty block" );
@@ -2319,13 +2373,14 @@ struct controller_impl {
          );
 
          if( s != controller::block_status::irreversible ) {
-            fork_db.add( bsp, true,pbft_enabled);
+            fork_db.add( bsp, true,pbft_enabled);///bos
          }
 
 
        
          emit( self.accepted_block_header, bsp );
 
+///bos begin
   // apply stable checkpoint when there is one
          // TODO: verify required one more time?
          for (const auto &extn: b->block_extensions) {
@@ -2335,6 +2390,7 @@ struct controller_impl {
                break;
             }
          }
+		 ///bos end
 		 
          if( s == controller::block_status::irreversible ) {
             apply_block( bsp, s, trx_meta_cache_lookup{} );
@@ -2357,6 +2413,7 @@ struct controller_impl {
       } FC_LOG_AND_RETHROW( )
    }
 
+///bos begin
    void pbft_commit_local( const block_id_type& id ) {
       pending_pbft_lib.reset();
       pending_pbft_lib.emplace(id);
@@ -2402,6 +2459,7 @@ struct controller_impl {
 
        }
    }
+///bos end
 
    void maybe_switch_forks( const block_state_ptr& new_head, controller::block_status s,
                             const forked_branch_callback& forked_branch_cb, const trx_meta_cache_lookup& trx_lookup )
@@ -2511,7 +2569,25 @@ fork_db.mark_in_current_chain( *ritr, true );
 
       return merkle( move(trx_digests) );
    }
+   ///bos bein
+    void set_ext_merkle() {
+        vector<digest_type> ext_digests;
+        extensions_type exts;
+        for ( const auto& extn: pending->_pending_block_state->block->block_extensions) {
+           if (extn.first != static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint))
+           {
+              exts.emplace_back(extn);
+           }
+        }
 
+        ext_digests.reserve( exts.size());
+        for( const auto& a : exts )
+           ext_digests.emplace_back( digest_type::hash(a) );
+
+        auto mroot = merkle( move(ext_digests));
+        pending->_pending_block_state->header.set_block_extensions_mroot(mroot);
+    }
+///bos end
    void update_producers_authority() {
       const auto& producers = pending->get_pending_block_header_state().active_schedule.producers;
 
@@ -2803,7 +2879,7 @@ const chainbase::database& controller::db()const { return my->db; }
 chainbase::database& controller::mutable_db()const { return my->db; }
 
 const fork_database& controller::fork_db()const { return my->fork_db; }
-
+///bos begin
 std::map<chain::public_key_type, signature_provider_type> controller:: my_signature_providers()const{
    return my->conf.my_signature_providers;
 }
@@ -2811,7 +2887,7 @@ std::map<chain::public_key_type, signature_provider_type> controller:: my_signat
 void controller::set_my_signature_providers(std::map<chain::public_key_type, signature_provider_type> msp){
     my->conf.my_signature_providers = msp;
 }
-
+///bos end
 void controller::preactivate_feature( const digest_type& feature_digest ) {
    const auto& pfs = my->protocol_features.get_protocol_feature_set();
    auto cur_time = pending_block_time();
@@ -2934,7 +3010,7 @@ void controller::validate_protocol_features( const vector<digest_type>& features
                                 features_to_activate );
 }
 
-void controller::start_block( block_timestamp_type when, uint16_t confirm_block_count )
+void controller::start_block( block_timestamp_type when, uint16_t confirm_block_count, std::function<signature_type(digest_type)> signer) {
 {
    validate_db_available_size();
 
@@ -2954,7 +3030,7 @@ void controller::start_block( block_timestamp_type when, uint16_t confirm_block_
    }
 
    my->start_block( when, confirm_block_count, new_protocol_feature_activations,
-                    block_status::incomplete, optional<block_id_type>() );
+                    block_status::incomplete, optional<block_id_type>() , signer);
 }
 
 void controller::start_block( block_timestamp_type when,
@@ -3020,6 +3096,7 @@ void controller::push_block( std::future<block_state_ptr>& block_state_future,
    validate_reversible_available_size();
    my->push_block( block_state_future, forked_branch_cb, trx_lookup );
 }
+///bos begin
 void controller::pbft_commit_local( const block_id_type& id ) {
    validate_db_available_size();
    my->pbft_commit_local(id);
@@ -3033,7 +3110,7 @@ bool controller::pending_pbft_lib() {
 void controller::set_pbft_latest_checkpoint( const block_id_type& id ) {
    my->set_pbft_latest_checkpoint(id);
 }
-
+///bos end
 transaction_trace_ptr controller::push_transaction( const transaction_metadata_ptr& trx, fc::time_point deadline, uint32_t billed_cpu_time_us ) {
    validate_db_available_size();
    EOS_ASSERT( get_read_mode() != chain::db_read_mode::READ_ONLY, transaction_type_exception, "push transaction not allowed in read-only mode" );
@@ -3180,6 +3257,12 @@ const vector<transaction_receipt>& controller::get_pending_trx_receipts()const {
    return my->pending->get_trx_receipts();
 }
 
+///bos begin
+std::function<signature_type(digest_type)> controller::pending_producer_signer()const {
+  EOS_ASSERT( my->pending, block_validate_exception, "no pending block" );
+  return my->pending->_signer;
+}
+///bos end
 uint32_t controller::last_irreversible_block_num() const {
    return my->fork_db.root()->block_num;
 }
@@ -3189,7 +3272,7 @@ block_id_type controller::last_irreversible_block_id() const {
 
    return get_block_id_for_num( lib_num );
 }
-
+///bos begin
 uint32_t controller::last_stable_checkpoint_block_num() const {
     return my->head->pbft_stable_checkpoint_blocknum;
 }
@@ -3213,6 +3296,7 @@ vector<uint32_t> controller::get_watermarks() const {
 bool controller::is_replaying() const {
    return my->replaying;
 }
+///bos end
 
 const dynamic_global_property_object& controller::get_dynamic_global_properties()const {
   return my->db.get<dynamic_global_property_object>();
@@ -3438,7 +3522,7 @@ bool controller::contracts_console()const {
 chain_id_type controller::get_chain_id()const {
    return my->chain_id;
 }
-
+///bos begin
 void controller::set_pbft_prepared(const block_id_type& id) {
    my->pbft_prepared.reset();
    auto bs = fetch_block_state_by_id(id);
@@ -3482,6 +3566,7 @@ void controller::reset_pbft_prepared() {
     maybe_switch_forks();
     if (my->pbft_prepared) my->pbft_prepared.reset();
 }
+///bos end
 
 db_read_mode controller::get_read_mode()const {
    return my->read_mode;
@@ -3584,7 +3669,19 @@ void controller::validate_reversible_available_size() const {
    const auto guard = my->conf.reversible_guard_size;
    EOS_ASSERT(free >= guard, reversible_guard_exception, "reversible free: ${f}, guard size: ${g}", ("f", free)("g",guard));
 }
+///bos begin
+path controller::state_dir() const {
+   return my->conf.state_dir;
+}
 
+path controller::blocks_dir() const {
+    return my->conf.blocks_dir;
+}
+
+producer_schedule_type controller::initial_schedule() const {
+   return producer_schedule_type{ 0, {{eosio::chain::config::system_account_name, my->conf.genesis.initial_key}} };
+}
+///bos end
 bool controller::is_protocol_feature_activated( const digest_type& feature_digest )const {
    if( my->pending )
       return my->pending->is_protocol_feature_activated( feature_digest );
@@ -3779,7 +3876,7 @@ void controller::set_name_list(int64_t list, int64_t action, std::vector<account
 {
    my->set_name_list(static_cast<list_type>(list), static_cast<list_action_type>(action), name_list);
 }
-// *bos end*
+
 
 const upgrade_property_object& controller::get_upgrade_properties()const {
     return my->db.get<upgrade_property_object>();
@@ -3808,5 +3905,6 @@ void controller::set_upo(uint32_t target_block_num) {
         });
     }
 }
+// *bos end*
 
 } } /// eosio::chain

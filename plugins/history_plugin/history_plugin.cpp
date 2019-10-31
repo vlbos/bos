@@ -262,7 +262,7 @@ namespace eosio {
                   datastream<char*> ds( aho.packed_action_trace.data(), ps );
                   fc::raw::pack( ds, at );
                   aho.action_sequence_num = at.receipt->global_sequence;
-                  aho.block_num = chain.pending_block_state()->block_num;
+                  aho.block_num = chain.head_block_num() + 1;
                   aho.block_time = chain.pending_block_time();
                   aho.trx_id     = at.trx_id;
                });
@@ -351,8 +351,8 @@ namespace eosio {
          db.add_index<public_key_history_multi_index>();
 
          my->applied_transaction_connection.emplace(
-               chain.applied_transaction.connect( [&]( const transaction_trace_ptr& p ) {
-                  my->on_applied_transaction( p );
+               chain.applied_transaction.connect( [&]( std::tuple<const transaction_trace_ptr&, const signed_transaction&> t ) {
+                  my->on_applied_transaction( std::get<0>(t) );
                } ));
       } FC_LOG_AND_RETHROW()
    }
@@ -368,9 +368,8 @@ namespace eosio {
 
 
    namespace history_apis {
-
       read_only::get_actions_result read_only::get_actions( const read_only::get_actions_params& params )const {
-        edump((params));
+         edump((params));
         auto& chain = history->chain_plug->chain();
         const auto& db = chain.db();
         const auto abi_serializer_max_time = history->chain_plug->get_abi_serializer_max_time();
@@ -491,14 +490,9 @@ namespace eosio {
             }
 
             auto blk = chain.fetch_block_by_number( result.block_num );
-            if( blk == nullptr ) { // still in pending
-                auto blk_state = chain.pending_block_state();
-                if( blk_state != nullptr ) {
-                    blk = blk_state->block;
-                }
-            }
-            if( blk != nullptr ) {
-                for (const auto &receipt: blk->transactions) {
+            if( blk || chain.is_building_block() ) {
+               const vector<transaction_receipt>& receipts = blk ? blk->transactions : chain.get_pending_trx_receipts();
+               for (const auto &receipt: receipts) {
                     if (receipt.trx.contains<packed_transaction>()) {
                         auto &pt = receipt.trx.get<packed_transaction>();
                         if (pt.id() == result.id) {
@@ -560,6 +554,7 @@ namespace eosio {
          return result;
       }
 
+///bos
       fc::variant read_only::get_block_detail(const read_only::get_block_detail_params& params) const {
         static char const TRANSACTIONS[] = "transactions";
         static char const TRX[]          = "trx";
@@ -647,6 +642,7 @@ namespace eosio {
 
         return fc::mutable_variant_object(src).set(TRANSACTIONS, move(lhs));
       }
+	  ///bos end
 
       read_only::get_key_accounts_results read_only::get_key_accounts(const get_key_accounts_params& params) const {
          std::set<account_name> accounts;

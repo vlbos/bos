@@ -125,6 +125,11 @@ struct block_header_state : public detail::block_header_state_common {
    /// duplication of work
    flat_multimap<uint16_t, block_header_extension> header_exts;
 
+    uint32_t                          pbft_stable_checkpoint_blocknum = 0;///bos
+	//    block_header_state   next( const signed_block_header& h, bool trust = false, bool pbft_enabled = false )const;
+   // block_header_state   generate_next( block_timestamp_type when, bool pbft_enabled = false )const;
+   // void set_confirmed( uint16_t num_prev_blocks, bool pbft_enabled = false );
+  //  bool maybe_promote_pending( bool pbft_enabled = false );
    block_header_state() = default;
 
    explicit block_header_state( detail::block_header_state_common&& base )
@@ -133,7 +138,7 @@ struct block_header_state : public detail::block_header_state_common {
 
    explicit block_header_state( legacy::snapshot_block_header_state_v2&& snapshot );
 
-   pending_block_header_state  next( block_timestamp_type when, uint16_t num_prev_blocks_to_confirm )const;
+   pending_block_header_state  next( block_timestamp_type when, uint16_t num_prev_blocks_to_confirm,bool pbft_enabled)const;
 
    block_header_state   next( const signed_block_header& h,
                               vector<signature_type>&& additional_signatures,
@@ -141,7 +146,7 @@ struct block_header_state : public detail::block_header_state_common {
                               const std::function<void( block_timestamp_type,
                                                         const flat_set<digest_type>&,
                                                         const vector<digest_type>& )>& validator,
-                              bool skip_validate_signee = false )const;
+                              bool skip_validate_signee = false ,bool pbft_enabled)const;
 
    bool                 has_pending_producers()const { return pending_schedule.schedule.producers.size(); }
    uint32_t             calc_dpos_last_irreversible( account_name producer_of_next_block )const;
@@ -183,6 +188,7 @@ FC_REFLECT_DERIVED(  eosio::chain::block_header_state, (eosio::chain::detail::bl
                      (pending_schedule)
                      (activated_protocol_features)
                      (additional_signatures)
+					 (pbft_stable_checkpoint_blocknum)
 )
 
 

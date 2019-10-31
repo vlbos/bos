@@ -169,18 +169,18 @@ BOOST_FIXTURE_TEST_CASE( abi_from_variant, TESTER ) try {
    set_abi(N(asserter), contracts::asserter_abi().data());
    produce_blocks(1);
 
-   auto resolver = [&,this]( const account_name& name ) -> fc::optional<abi_serializer> {
+   auto resolver = [&,this]( const account_name& name ) -> optional<abi_serializer> {
       try {
          const auto& accnt  = this->control->db().get<account_object,by_name>( name );
          abi_def abi;
          if (abi_serializer::to_abi(accnt.abi, abi)) {
             return abi_serializer(abi, abi_serializer_max_time);
          }
-         return fc::optional<abi_serializer>();
+         return optional<abi_serializer>();
       } FC_RETHROW_EXCEPTIONS(error, "Failed to find or parse ABI for ${name}", ("name", name))
    };
 
-   fc::variant pretty_trx = mutable_variant_object()
+   variant pretty_trx = mutable_variant_object()
       ("actions", variants({
          mutable_variant_object()
             ("account", "asserter")
@@ -560,6 +560,23 @@ BOOST_FIXTURE_TEST_CASE( check_entry_behavior_2, TESTER ) try {
    BOOST_CHECK_EQUAL(transaction_receipt::executed, receipt.status);
 } FC_LOG_AND_RETHROW()
 
+BOOST_FIXTURE_TEST_CASE( entry_import, TESTER ) try {
+   create_accounts( {N(enterimport)} );
+   produce_block();
+
+   set_code(N(enterimport), entry_import_wast);
+
+   signed_transaction trx;
+   action act;
+   act.account = N(enterimport);
+   act.name = N();
+   act.authorization = vector<permission_level>{{N(enterimport),config::active_name}};
+   trx.actions.push_back(act);
+
+   set_transaction_headers(trx);
+   trx.sign(get_private_key( N(enterimport), "active" ), control->get_chain_id());
+   BOOST_CHECK_THROW(push_transaction(trx), abort_called);
+} FC_LOG_AND_RETHROW()
 
 /**
  * Ensure we can load a wasm w/o memory
@@ -665,6 +682,42 @@ BOOST_FIXTURE_TEST_CASE( table_init_tests, TESTER ) try {
    produce_blocks(1);
 
    BOOST_CHECK_THROW(set_code(N(tableinit), too_big_table), eosio::chain::wasm_execution_error);
+
+} FC_LOG_AND_RETHROW()
+
+BOOST_FIXTURE_TEST_CASE( table_init_oob, TESTER ) try {
+   create_accounts( {N(tableinitoob)} );
+   produce_block();
+
+   signed_transaction trx;
+   trx.actions.emplace_back(vector<permission_level>{{N(tableinitoob),config::active_name}}, N(tableinitoob), N(), bytes{});
+   trx.actions[0].authorization = vector<permission_level>{{N(tableinitoob),config::active_name}};
+
+    auto pushit_and_expect_fail = [&]() {
+      produce_block();
+      trx.signatures.clear();
+      set_transaction_headers(trx);
+      trx.sign(get_private_key(N(tableinitoob), "active"), control->get_chain_id());
+      
+      //the unspecified_exception_code comes from WAVM, which manages to throw a WAVM specific exception
+      // up to where exec_one captures it and doesn't understand it
+      BOOST_CHECK_THROW(push_transaction(trx), eosio::chain::wasm_execution_error);
+   };
+
+   set_code(N(tableinitoob), table_init_oob_wast);
+   produce_block();
+
+   pushit_and_expect_fail();
+   //make sure doing it again didn't lodge something funky in to a cache
+   pushit_and_expect_fail();
+
+   set_code(N(tableinitoob), table_init_oob_smaller_wast);
+   produce_block();
+   pushit_and_expect_fail();
+   pushit_and_expect_fail();
+
+   //an elem w/o a table is a setcode fail though
+   BOOST_CHECK_THROW(set_code(N(tableinitoob), table_init_oob_no_table_wast), eosio::chain::wasm_exception);
 
 } FC_LOG_AND_RETHROW()
 
@@ -1331,7 +1384,7 @@ BOOST_FIXTURE_TEST_CASE( lotso_stack_4, TESTER ) try {
       ss << "(local i32)";
    ss << "  )";
    ss << ")";
-   BOOST_CHECK_THROW(set_code(N(stackz), ss.str().c_str()), fc::exception);
+   BOOST_CHECK_THROW(set_code(N(stackz), ss.str().c_str()), wasm_serialization_error);
    produce_blocks(1);
    }
 } FC_LOG_AND_RETHROW()
@@ -1394,7 +1447,7 @@ BOOST_FIXTURE_TEST_CASE( lotso_stack_7, TESTER ) try {
       ss << "(param i32)";
    ss << "  )";
    ss << ")";
-   BOOST_CHECK_THROW(set_code(N(stackz), ss.str().c_str()), fc::exception);
+   BOOST_CHECK_THROW(set_code(N(stackz), ss.str().c_str()), wasm_execution_error);
    produce_blocks(1);
    }
 } FC_LOG_AND_RETHROW()
@@ -1435,7 +1488,7 @@ BOOST_FIXTURE_TEST_CASE( lotso_stack_9, TESTER ) try {
       ss << "(local f32)";
    ss << "  )";
    ss << ")";
-   BOOST_CHECK_THROW(set_code(N(stackz), ss.str().c_str()), fc::exception);
+   BOOST_CHECK_THROW(set_code(N(stackz), ss.str().c_str()), wasm_execution_error);
    produce_blocks(1);
    }
 } FC_LOG_AND_RETHROW()
@@ -1716,6 +1769,129 @@ BOOST_FIXTURE_TEST_CASE( getcode_checks, TESTER ) try {
    wasm_to_wast( wasmx.data(), wasmx.size(), true );
 } FC_LOG_AND_RETHROW()
 
+BOOST_FIXTURE_TEST_CASE( big_maligned_host_ptr, TESTER ) try {
+   produce_blocks(2);
+   create_accounts( {N(bigmaligned)} );
+   produce_block();
+
+   string large_maligned_host_ptr_wast_f = fc::format_string(large_maligned_host_ptr, fc::mutable_variant_object()
+                                              ("MAX_WASM_PAGES", eosio::chain::wasm_constraints::maximum_linear_memory/(64*1024))
+                                              ("MAX_NAME_ARRAY", (eosio::chain::wasm_constraints::maximum_linear_memory-1)/sizeof(chain::account_name)));
+
+   set_code(N(bigmaligned), large_maligned_host_ptr_wast_f.c_str());
+   produce_blocks(1);
+
+   signed_transaction trx;
+   action act;
+   act.account = N(bigmaligned);
+   act.name = N();
+   act.authorization = vector<permission_level>{{N(bigmaligned),config::active_name}};
+   trx.actions.push_back(act);
+   set_transaction_headers(trx);
+   trx.sign(get_private_key( N(bigmaligned), "active" ), control->get_chain_id());
+   push_transaction(trx);
+   produce_blocks(1);
+} FC_LOG_AND_RETHROW()
+
+BOOST_FIXTURE_TEST_CASE( depth_tests, TESTER ) try {
+   produce_block();
+   create_accounts( {N(depth)} );
+   produce_block();
+
+   signed_transaction trx;
+   trx.actions.emplace_back(vector<permission_level>{{N(depth),config::active_name}}, N(depth), N(), bytes{});
+   trx.actions[0].authorization = vector<permission_level>{{N(depth),config::active_name}};
+
+    auto pushit = [&]() {
+      produce_block();
+      trx.signatures.clear();
+      set_transaction_headers(trx);
+      trx.sign(get_private_key(N(depth), "active"), control->get_chain_id());
+      push_transaction(trx);
+   };
+
+   //strictly wasm recursion to maximum_call_depth & maximum_call_depth+1
+   string wasm_depth_okay = fc::format_string(depth_assert_wasm, fc::mutable_variant_object()
+                                              ("MAX_DEPTH", eosio::chain::wasm_constraints::maximum_call_depth));
+   set_code(N(depth), wasm_depth_okay.c_str());
+   pushit();
+
+   string wasm_depth_one_over = fc::format_string(depth_assert_wasm, fc::mutable_variant_object()
+                                              ("MAX_DEPTH", eosio::chain::wasm_constraints::maximum_call_depth+1));
+   set_code(N(depth), wasm_depth_one_over.c_str());
+   BOOST_CHECK_THROW(pushit(), wasm_execution_error);
+
+   //wasm recursion but call an intrinsic as the last function instead
+   string intrinsic_depth_okay = fc::format_string(depth_assert_intrinsic, fc::mutable_variant_object()
+                                              ("MAX_DEPTH", eosio::chain::wasm_constraints::maximum_call_depth));
+   set_code(N(depth), intrinsic_depth_okay.c_str());
+   pushit();
+
+   string intrinsic_depth_one_over = fc::format_string(depth_assert_intrinsic, fc::mutable_variant_object()
+                                              ("MAX_DEPTH", eosio::chain::wasm_constraints::maximum_call_depth+1));
+   set_code(N(depth), intrinsic_depth_one_over.c_str());
+   BOOST_CHECK_THROW(pushit(), wasm_execution_error);
+
+   //add a float operation in the mix to ensure any injected softfloat call doesn't count against limit
+   string wasm_float_depth_okay = fc::format_string(depth_assert_wasm_float, fc::mutable_variant_object()
+                                              ("MAX_DEPTH", eosio::chain::wasm_constraints::maximum_call_depth));
+   set_code(N(depth), wasm_float_depth_okay.c_str());
+   pushit();
+
+   string wasm_float_depth_one_over = fc::format_string(depth_assert_wasm_float, fc::mutable_variant_object()
+                                              ("MAX_DEPTH", eosio::chain::wasm_constraints::maximum_call_depth+1));
+   set_code(N(depth), wasm_float_depth_one_over.c_str());
+   BOOST_CHECK_THROW(pushit(), wasm_execution_error);
+
+} FC_LOG_AND_RETHROW()
+
+BOOST_FIXTURE_TEST_CASE( varuint_memory_flags_tests, TESTER ) try {
+   produce_block();
+   create_accounts( {N(memflags)} );
+   produce_block();
+
+   set_code(N(memflags), varuint_memory_flags);
+   produce_block();
+
+   signed_transaction trx;
+   action act;
+   act.account = N(memflags);
+   act.name = N();
+   act.authorization = vector<permission_level>{{N(memflags),config::active_name}};
+   trx.actions.push_back(act);
+   set_transaction_headers(trx);
+   trx.sign(get_private_key( N(memflags), "active" ), control->get_chain_id());
+   push_transaction(trx);
+   produce_block();
+} FC_LOG_AND_RETHROW()
+
+// TODO: Update to use eos-vm once merged
+BOOST_AUTO_TEST_CASE( code_size )  try {
+   using namespace IR;
+   using namespace Runtime;
+   using namespace Serialization;
+   std::vector<U8> code_start = {
+      0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01, 0x60,
+      0x03, 0x7e, 0x7e, 0x7e, 0x00, 0x03, 0x02, 0x01, 0x00, 0x07, 0x09, 0x01,
+      0x05, 0x61, 0x70, 0x70, 0x6c, 0x79, 0x00, 0x00, 0x0a, 0x8b, 0x80, 0x80,
+      0x0a, 0x01, 0x86, 0x80, 0x80, 0x0a, 0x00
+   };
+
+   std::vector<U8> code_end = { 0x0b };
+ 
+   std::vector<U8> code_function_body;
+   code_function_body.insert(code_function_body.end(), wasm_constraints::maximum_code_size + 4, 0x01);
+
+   std::vector<U8> code;
+   code.insert(code.end(), code_start.begin(), code_start.end());
+   code.insert(code.end(), code_function_body.begin(), code_function_body.end());
+   code.insert(code.end(), code_end.begin(), code_end.end());
+
+   Module module;
+   Serialization::MemoryInputStream stream((const U8*)code.data(), code.size());
+   BOOST_CHECK_THROW(WASM::serialize(stream, module), FatalSerializationException);
+
+} FC_LOG_AND_RETHROW()
 
 // TODO: restore net_usage_tests
 #if 0

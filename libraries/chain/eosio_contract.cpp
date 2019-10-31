@@ -1,7 +1,3 @@
-/**
- *  @file
- *  @copyright defined in eos/LICENSE
- */
 #include <eosio/chain/eosio_contract.hpp>
 #include <eosio/chain/contract_table_objects.hpp>
 
@@ -343,7 +339,15 @@ void apply_eosio_linkauth(apply_context& context) {
       EOS_ASSERT(code != nullptr, account_query_exception,
                  "Failed to retrieve code for account: ${account}", ("account", requirement.code));
       if( requirement.requirement != config::eosio_any_name ) {
-         const auto *permission = db.find<permission_object, by_name>(requirement.requirement);
+         const permission_object* permission = nullptr;
+         if( context.control.is_builtin_activated( builtin_protocol_feature_t::only_link_to_existing_permission ) ) {
+            permission = db.find<permission_object, by_owner>(
+                           boost::make_tuple( requirement.account, requirement.requirement )
+                         );
+         } else {
+            permission = db.find<permission_object, by_name>(requirement.requirement);
+         }
+
          EOS_ASSERT(permission != nullptr, permission_query_exception,
                     "Failed to retrieve permission: ${permission}", ("permission", requirement.requirement));
       }
