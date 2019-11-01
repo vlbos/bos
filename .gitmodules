@@ -34,7 +34,7 @@
 	path = libraries/eos-vm
 	url = https://github.com/eosio/eos-vm
 [submodule "eosio-wasm-spec-tests"]
-	path = eosio-wasm-s
+	path = eosio-wasm-spec-tests
 	url = https://github.com/EOSIO/eosio-wasm-spec-tests
 
 [submodule "libraries/yubihsm"]
