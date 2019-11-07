@@ -25,7 +25,7 @@ namespace eosio { namespace chain {
 
          void open( const std::function<void( block_timestamp_type,
                                               const flat_set<digest_type>&,
-                                              const vector<digest_type>& )>& validator );
+                                              const vector<digest_type>& )>& validator ,bool pbft_enabled);
          void close();
 
          block_header_state_ptr  get_block_header( const block_id_type& id )const;
@@ -90,10 +90,11 @@ namespace eosio { namespace chain {
 
          static const uint32_t min_supported_version;
          static const uint32_t max_supported_version;
-		 ///bos begin
-         void set_bft_irreversible( const block_id_type& id );
+         /// bos begin
 
-         void set_latest_checkpoint( const block_id_type& id);
+         void set_bft_irreversible(const block_id_type& id);
+
+         void set_latest_checkpoint(const block_id_type& id);
 
          void mark_pbft_prepared_fork(const block_state_ptr& h);
 
@@ -105,10 +106,10 @@ namespace eosio { namespace chain {
 
          vector<block_num_type> get_watermarks_in_forkdb();
 
-         void mark_as_pbft_watermark( const block_state_ptr& h);
-		 ///bos end
+         void mark_as_pbft_watermark(const block_state_ptr &h);
+         /// bos end
 
-   private:
+       private:
          unique_ptr<fork_database_impl> my;
    };
 

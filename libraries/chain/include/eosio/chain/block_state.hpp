@@ -36,7 +36,9 @@ namespace eosio { namespace chain {
 
 
       signed_block_ptr                                    block;
-
+      bool                                                pbft_prepared = false;///bos
+      bool                                                pbft_my_prepare = false;
+      bool                                                pbft_watermark = false;
    private: // internal use only, not thread safe
       friend struct fc::reflector<block_state>;
       friend bool block_state_is_valid( const block_state& ); // work-around for multi-index access
@@ -62,10 +64,10 @@ namespace eosio { namespace chain {
       const vector<transaction_metadata_ptr>& trxs_metas()const { return _cached_trxs; }
 
       bool                                                validated = false;
-      bool                                                in_current_chain = false;
-      bool                                                pbft_prepared = false;///bos
-      bool                                                pbft_my_prepare = false;
-      bool                                                pbft_watermark = false;
+
+      bool                                                _pub_keys_recovered = false;
+  
+ 
 
       /// this data is redundant with the data stored in block, but facilitates
       /// recapturing transactions when we pop a block
@@ -77,4 +79,4 @@ namespace eosio { namespace chain {
 
 } } /// namespace eosio::chain
 ///bos
-FC_REFLECT_DERIVED( eosio::chain::block_state, (eosio::chain::block_header_state), (block)(validated)(in_current_chain)(pbft_prepared)(pbft_my_prepare)(pbft_watermark) )
+FC_REFLECT_DERIVED( eosio::chain::block_state, (eosio::chain::block_header_state), (block)(validated)(pbft_prepared)(pbft_my_prepare)(pbft_watermark) )

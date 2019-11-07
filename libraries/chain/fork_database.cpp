@@ -43,21 +43,23 @@ namespace eosio { namespace chain {
                global_fun<const block_state&,            bool,          &block_state_is_valid>,
                member<detail::block_header_state_common, uint32_t,      &detail::block_header_state_common::dpos_irreversible_blocknum>,
                member<detail::block_header_state_common, uint32_t,      &detail::block_header_state_common::block_num>,
-               member<block_state,bool,&block_state::pbft_prepared>,///bos
-               member<block_state,bool,&block_state::pbft_my_prepare>,///bos
+               member<block_state,bool,&block_state::pbft_prepared>,
+               member<block_state,bool,&block_state::pbft_my_prepare>,
                member<block_header_state,                block_id_type, &block_header_state::id>
             >,
             composite_key_compare<
                std::greater<bool>,
                std::greater<uint32_t>,
                std::greater<uint32_t>,
+			   std::greater<bool>,
+			   std::greater<bool>,
                sha256_less
             >
          >,
          ordered_non_unique< tag<by_watermark>,
             composite_key< block_state,
                member<block_state,bool,&block_state::pbft_watermark>,
-               member<block_header_state,uint32_t,&block_header_state::block_num>
+               member<detail::block_header_state_common,uint32_t,&detail::block_header_state_common::block_num>
             >,
             composite_key_compare< std::greater<>, std::less<> >
          >
@@ -86,6 +88,7 @@ namespace eosio { namespace chain {
                 const std::function<void( block_timestamp_type,
                                           const flat_set<digest_type>&,
                                           const vector<digest_type>& )>& validator,bool pbft_enabled );
+
    };
 
 
@@ -96,7 +99,7 @@ namespace eosio { namespace chain {
 
    void fork_database::open( const std::function<void( block_timestamp_type,
                                                        const flat_set<digest_type>&,
-                                                       const vector<digest_type>& )>& validator )
+                                                       const vector<digest_type>& )>& validator,bool pbft_enabled  )
    {
       if (!fc::is_directory(my->datadir))
          fc::create_directories(my->datadir);
@@ -139,14 +142,16 @@ namespace eosio { namespace chain {
                  fc::raw::unpack( tmp_ds, validated );
                  bool in_current_chain;
                  fc::raw::unpack( tmp_ds, in_current_chain );
-                 block_state s{h};
+                 block_state s;
                  s.block = b;
                  s.validated = validated;
-                 s.in_current_chain = in_current_chain;
+               //   s.in_current_chain = in_current_chain;///eos2.0 removed
 
                  s.pbft_prepared = false;
                  s.pbft_my_prepare = false;
-                 set( std::make_shared<block_state>( move( s ) ) );
+               //   set( std::make_shared<block_state>( move( s ) ) );
+               my->add(std::make_shared<block_state>(move(s)), false, true,
+                     validator, pbft_enabled );
              }
              block_id_type head_id;
              fc::raw::unpack( tmp_ds, head_id );
@@ -164,43 +169,40 @@ namespace eosio { namespace chain {
            EOS_ASSERT(version_num == 2, fork_database_exception,
                       "invalid version num in forkdb.dat");
            /// bos end
-           // validate totem
-           uint32_t totem = 0;
-           fc::raw::unpack(ds, totem);
-           EOS_ASSERT(
-               totem == magic_number, fork_database_exception,
-               "Fork database file '${filename}' has unexpected magic number: "
-               "${actual_totem}. Expected ${expected_totem}",
-               ("filename", fork_db_dat.generic_string())(
-                   "actual_totem", totem)("expected_totem", magic_number));
+            // validate totem
+            uint32_t totem = 0;
+            fc::raw::unpack( ds, totem );
+            EOS_ASSERT( totem == magic_number, fork_database_exception,
+                        "Fork database file '${filename}' has unexpected magic number: ${actual_totem}. Expected ${expected_totem}",
+                        ("filename", fork_db_dat.generic_string())
+                        ("actual_totem", totem)
+                        ("expected_totem", magic_number)
+            );
 
-           // validate version
-           uint32_t version = 0;
-           fc::raw::unpack(ds, version);
-           EOS_ASSERT(
-               version >= min_supported_version &&
-                   version <= max_supported_version,
-               fork_database_exception,
-               "Unsupported version of fork database file '${filename}'. "
-               "Fork database version is ${version} while code supports "
-               "version(s) [${min},${max}]",
-               ("filename", fork_db_dat.generic_string())("version", version)(
-                   "min", min_supported_version)("max", max_supported_version));
+            // validate version
+            uint32_t version = 0;
+            fc::raw::unpack( ds, version );
+            EOS_ASSERT( version >= min_supported_version && version <= max_supported_version,
+                        fork_database_exception,
+                       "Unsupported version of fork database file '${filename}'. "
+                       "Fork database version is ${version} while code supports version(s) [${min},${max}]",
+                       ("filename", fork_db_dat.generic_string())
+                       ("version", version)
+                       ("min", min_supported_version)
+                       ("max", max_supported_version)
+            );
 
-           block_header_state bhs;
-           fc::raw::unpack(ds, bhs);
-           reset(bhs);
+            block_header_state bhs;
+            fc::raw::unpack( ds, bhs );
+            reset( bhs );
 
-           unsigned_int size;
-           fc::raw::unpack(ds, size);
-           for (uint32_t i = 0, n = size.value; i < n; ++i) {
-             block_state s;
-             fc::raw::unpack(ds, s);
-             // do not populate transaction_metadatas, they will be created as
-             // needed in apply_block with appropriate key recovery
-             s.header_exts = s.block->validate_and_extract_header_extensions();
-             my->add(std::make_shared<block_state>(move(s)), false, true,
-                     validator);
+            unsigned_int size; fc::raw::unpack( ds, size );
+            for( uint32_t i = 0, n = size.value; i < n; ++i ) {
+               block_state s;
+               fc::raw::unpack( ds, s );
+               // do not populate transaction_metadatas, they will be created as needed in apply_block with appropriate key recovery
+               s.header_exts = s.block->validate_and_extract_header_extensions();
+               my->add( std::make_shared<block_state>( move( s ) ), false, true, validator, pbft_enabled  );///bos
             }
             block_id_type head_id;
             fc::raw::unpack( ds, head_id );
@@ -262,29 +264,31 @@ namespace eosio { namespace chain {
       auto validated_itr = unvalidated_end;
       auto validated_end = indx.rend();
 
-      for (bool unvalidated_remaining = (unvalidated_itr != unvalidated_end),
-                validated_remaining = (validated_itr != validated_end);
+      for(  bool unvalidated_remaining = (unvalidated_itr != unvalidated_end),
+                 validated_remaining   = (validated_itr != validated_end);
 
-           unvalidated_remaining || validated_remaining;
+            unvalidated_remaining || validated_remaining;
 
-           unvalidated_remaining = (unvalidated_itr != unvalidated_end),
-                validated_remaining = (validated_itr != validated_end)) {
-        auto itr = (validated_remaining ? validated_itr : unvalidated_itr);
+            unvalidated_remaining = (unvalidated_itr != unvalidated_end),
+            validated_remaining   = (validated_itr != validated_end)
+         )
+      {
+         auto itr = (validated_remaining ? validated_itr : unvalidated_itr);
 
-        if (unvalidated_remaining && validated_remaining) {
-          if (first_preferred(**validated_itr, **unvalidated_itr)) {
-            itr = unvalidated_itr;
+         if( unvalidated_remaining && validated_remaining ) {
+            if( first_preferred( **validated_itr, **unvalidated_itr ) ) {
+               itr = unvalidated_itr;
+               ++unvalidated_itr;
+            } else {
+               ++validated_itr;
+            }
+         } else if( unvalidated_remaining ) {
             ++unvalidated_itr;
-          } else {
+         } else {
             ++validated_itr;
-          }
-        } else if (unvalidated_remaining) {
-          ++unvalidated_itr;
-        } else {
-          ++validated_itr;
-        }
+         }
 
-        fc::raw::pack(out, *(*itr));
+         fc::raw::pack( out, *(*itr) );
       }
 
       if( my->head ) {
@@ -367,11 +371,12 @@ namespace eosio { namespace chain {
 
       return block_header_state_ptr();
    }
+
    void fork_database_impl::add( const block_state_ptr& n,
                                  bool ignore_duplicate, bool validate,
                                  const std::function<void( block_timestamp_type,
                                                            const flat_set<digest_type>&,
-                                                           const vector<digest_type>& )>& validator )
+                                                           const vector<digest_type>& )>& validator,bool pbft_enabled  )///bos
    {
       EOS_ASSERT( root, fork_database_exception, "root not yet set" );
       EOS_ASSERT( n, fork_database_exception, "attempt to add null block state" );
@@ -397,35 +402,37 @@ namespace eosio { namespace chain {
          if( ignore_duplicate ) return;
          EOS_THROW( fork_database_exception, "duplicate block added", ("id", n->id) );
       }
-///bos begin
-      auto prior = my->index.find( n->block->previous );
+      /// bos begin
+      // auto prior = index.find(n->block->previous);
 
-      if (prior !=  my->index.end()) {
-          if ((*prior)->pbft_prepared) mark_pbft_prepared_fork(*prior);
-          if ((*prior)->pbft_my_prepare) mark_pbft_my_prepare_fork(*prior);
+      // if (prior != index.end()) {
+      //   if ((*prior)->pbft_prepared)
+      //     mark_pbft_prepared_fork(*prior);
+      //   if ((*prior)->pbft_my_prepare)
+      //     mark_pbft_my_prepare_fork(*prior);
+      // }
+      /// bos end
+      auto candidate = index.get<by_lib_block_num>().begin();
+      if ((*candidate)->is_valid()) {
+        head = *candidate;
       }
-///bos end
-       auto candidate = index.get<by_lib_block_num>().begin();
-      if( (*candidate)->is_valid() ) {
-         head = *candidate;
-      }
-///bos begin
-      auto lib = std::max(my->head->bft_irreversible_blocknum, my->head->dpos_irreversible_blocknum);
-      auto checkpoint = my->head->pbft_stable_checkpoint_blocknum;
+      /// bos begin
+      // auto lib = std::max(head->bft_irreversible_blocknum,
+      //                     head->dpos_irreversible_blocknum);
+      // auto checkpoint = head->pbft_stable_checkpoint_blocknum;
 
-      auto oldest = *my->index.get<by_block_num>().begin();
+      // auto oldest = *index.get<by_lib_block_num>().begin();
 
-      if (!pbft_enabled && oldest->block_num < lib) {
-          prune( oldest );
-      } else {
-          // prune all blocks below lscb
-          while (oldest->block_num < lib && oldest->block_num < checkpoint ) {
-              prune( oldest );
-              oldest = *my->index.get<by_block_num>().begin();
-          }
-      }
-///bos end
-
+      // if (!pbft_enabled && oldest->block_num < lib) {
+      //   remove(oldest);
+      // } else {
+      //   // prune all blocks below lscb
+      //   while (oldest->block_num < lib && oldest->block_num < checkpoint) {
+      //     remove(oldest);
+      //     oldest = *index.get<by_lib_block_num>().begin();
+      //   }
+      // }
+      /// bos end
    }
 
    void fork_database::add( const block_state_ptr& n, bool ignore_duplicate, bool pbft_enabled ) {
@@ -433,7 +440,7 @@ namespace eosio { namespace chain {
                []( block_timestamp_type timestamp,
                    const flat_set<digest_type>& cur_features,
                    const vector<digest_type>& new_features )
-               {},  pbft_enabled
+               {},  pbft_enabled///bos
       );
    }
 
@@ -649,7 +656,7 @@ namespace eosio { namespace chain {
    }
 
    void fork_database::remove_pbft_my_prepare_fork()  {
-       auto oldest = *my->index.get<by_block_num>().begin();
+       auto oldest = *my->index.get<by_lib_block_num>().begin();
 
        auto& by_id_idx = my->index.get<by_block_id>();
        auto itr = by_id_idx.find( oldest->id );
@@ -681,7 +688,7 @@ namespace eosio { namespace chain {
    }
 
     void fork_database::remove_pbft_prepared_fork()  {
-        auto oldest = *my->index.get<by_block_num>().begin();
+        auto oldest = *my->index.get<by_lib_block_num>().begin();
     
         auto& by_id_idx = my->index.get<by_block_id>();
         auto itr = by_id_idx.find( oldest->id );
@@ -711,31 +718,8 @@ namespace eosio { namespace chain {
         }
         my->head = *my->index.get<by_lib_block_num>().begin();
     }
-///bos end
-   block_state_ptr   fork_database::get_block_in_current_chain_by_num( uint32_t n )const {
-      const auto& numidx = my->index.get<by_block_num>();
-      auto nitr = numidx.lower_bound( n );
 
-      // following asserts removed so null can be returned
-      //FC_ASSERT( nitr != numidx.end() && (*nitr)->block_num == n,
-      //           "could not find block in fork database with block number ${block_num}", ("block_num", n) );
-      //FC_ASSERT( (*nitr)->in_current_chain == true,
-      //           "block (with block number ${block_num}) found in fork database is not in the current chain", ("block_num", n) );
-      if( nitr == numidx.end() || (*nitr)->block_num != n || (*nitr)->in_current_chain != true )
-         return block_state_ptr();
-      return *nitr;
-   }
 
-   void fork_database::add( const header_confirmation& c ) {
-      auto b = get_block( c.block_id );
-      EOS_ASSERT( b, fork_db_block_not_found, "unable to find block id ${id}", ("id",c.block_id));
-      b->add_confirmation( c );
-
-      if( b->bft_irreversible_blocknum < b->block_num &&
-         b->confirmations.size() >= ((b->active_schedule.producers.size() * 2) / 3 + 1) ) {
-         set_bft_irreversible( c.block_id );
-      }
-   }
 
    /**
     *  This method will set this block as being BFT irreversible and will update
@@ -745,10 +729,9 @@ namespace eosio { namespace chain {
     *  This will require a search over all forks
     */
    void fork_database::set_bft_irreversible( const block_id_type& id ) {
-   ///bos begin
        auto b = get_block( id );
        EOS_ASSERT( b, fork_db_block_not_found, "unable to find block id ${id}", ("id",id));
-///bos end
+
        auto& idx = my->index.get<by_block_id>();
        auto itr = idx.find(id);
        uint32_t block_num = (*itr)->block_num;
@@ -786,7 +769,7 @@ namespace eosio { namespace chain {
        while( queue.size() ) {
            queue = update( queue );
        }
-       my->head = *my->index.get<by_lib_block_num>().begin();///bos
+       my->head = *my->index.get<by_lib_block_num>().begin();
    }
 
    void fork_database::set_latest_checkpoint( const block_id_type& id) {

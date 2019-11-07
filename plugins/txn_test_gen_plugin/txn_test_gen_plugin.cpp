@@ -204,7 +204,7 @@ struct txn_test_gen_plugin_impl {
             trx.actions.emplace_back(vector<chain::permission_level>{{creator,name("active")}}, newaccount{creator, newaccountT, owner_auth, active_auth});
                   //delegate cpu net and buyram  ///bos
                   auto act_delegatebw = create_action_delegatebw(creator, newaccountT,net,cpu,abi_serializer_max_time);
-                  auto act_buyram = create_action_buyram(creator, newaccountC, ram, abi_serializer_max_time);
+                  auto act_buyram = create_action_buyram(creator, newaccountT, ram, abi_serializer_max_time);
 
                   trx.actions.emplace_back(act_delegatebw);
                   trx.actions.emplace_back(act_buyram);
@@ -296,15 +296,25 @@ struct txn_test_gen_plugin_impl {
    }
 
   eosio::chain::action create_action_delegatebw(const name &from, const name &to, const asset &net, const asset &cpu, const fc::microseconds &abi_serializer_max_time){
-      fc::variant variant_delegate = fc::mutable_variant_object()
+      // fc::variant variant_delegate = fc::mutable_variant_object()
+      //         ("from", from.to_string())
+      //         ("receiver", to.to_string())
+      //         ("stake_net_quantity", net.to_string())
+      //         ("stake_cpu_quantity", cpu.to_string())
+      //         ("transfer", true);
+      abi_serializer eosio_system_serializer{fc::json::from_string(contracts::eosio_system_abi().data()).as<abi_def>(), abi_serializer_max_time};
+
+      // auto payload_delegate = eosio_system_serializer.variant_to_binary("delegatebw", variant_delegate, abi_serializer_max_time);
+      auto payload_delegate = eosio_system_serializer.variant_to_binary("delegatebw",
+                                                                        fc::json::from_string(fc::format_string("{\"from\":\"${from}\",\"receiver\":\"${receiver}\",\"stake_net_quantity\":\"${stake_net_quantity}\",\"stake_cpu_quantity\":\"${stake_cpu_quantity}\",\"transfer\":\"${transfer}\"}",
+                                                                        fc::mutable_variant_object()
               ("from", from.to_string())
               ("receiver", to.to_string())
               ("stake_net_quantity", net.to_string())
               ("stake_cpu_quantity", cpu.to_string())
-              ("transfer", true);
-      abi_serializer eosio_system_serializer{fc::json::from_string(eosio_system_abi).as<abi_def>(), abi_serializer_max_time};
+              ("transfer", true))),
+                                                                        abi_serializer_max_time);
 
-      auto payload_delegate = eosio_system_serializer.variant_to_binary( name("delegatebw"), variant_delegate, abi_serializer_max_time);
       eosio::chain::action act_delegate{vector<chain::permission_level>{{from,name("active")}},
               config::system_account_name, N(delegatebw), payload_delegate};
 
@@ -312,13 +322,20 @@ struct txn_test_gen_plugin_impl {
   }
 
   eosio::chain::action create_action_buyram(const name &from, const name &to, const asset &quant, const fc::microseconds &abi_serializer_max_time){
-      fc::variant variant_buyram = fc::mutable_variant_object()
+      // fc::variant variant_buyram = fc::mutable_variant_object()
+      //         ("payer", from.to_string())
+      //         ("receiver", to.to_string())
+      //         ("quant", quant.to_string());
+      abi_serializer eosio_system_serializer{fc::json::from_string(contracts::eosio_system_abi().data()).as<abi_def>(), abi_serializer_max_time};
+
+      auto payload_buyram = eosio_system_serializer.variant_to_binary("buyram", 
+      fc::json::from_string(fc::format_string("{\"payer\":\"${payer}\",\"receiver\":\"${receiver}\",\"quant\":\"${quant}\"}",
+      fc::mutable_variant_object()
               ("payer", from.to_string())
               ("receiver", to.to_string())
-              ("quant", quant.to_string());
-      abi_serializer eosio_system_serializer{fc::json::from_string(eosio_system_abi).as<abi_def>(), abi_serializer_max_time};
+              ("quant", quant.to_string()))), 
+      abi_serializer_max_time);
 
-      auto payload_buyram = eosio_system_serializer.variant_to_binary( name("buyram"), variant_buyram, abi_serializer_max_time);
       eosio::chain::action act_buyram{vector<chain::permission_level>{{from,name("active")}},
               config::system_account_name, N(buyram), payload_buyram};
 

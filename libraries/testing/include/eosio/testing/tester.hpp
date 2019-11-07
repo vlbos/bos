@@ -334,14 +334,14 @@ namespace eosio { namespace testing {
          static action_result wasm_assert_code( uint64_t error_code ) { return "assertion failure with error code: " + std::to_string(error_code); }
 
          auto get_resolver() {
-            return [this]( const account_name& name ) -> optional<abi_serializer> {
+            return [this]( const account_name& name ) -> fc::optional<abi_serializer> {
                try {
                   const auto& accnt = control->db().get<account_object, by_name>( name );
                   abi_def abi;
                   if( abi_serializer::to_abi( accnt.abi, abi )) {
                      return abi_serializer( abi, abi_serializer_max_time );
                   }
-                  return optional<abi_serializer>();
+                  return fc::optional<abi_serializer>();
                } FC_RETHROW_EXCEPTIONS( error, "Failed to find or parse ABI for ${name}", ("name", name))
             };
          }

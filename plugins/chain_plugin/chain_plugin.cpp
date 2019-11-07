@@ -1204,27 +1204,27 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
 
       my->pbft_outgoing_prepare_connection = my->pbft_ctrl->state_machine.pbft_outgoing_prepare.connect(
               [this]( const pbft_prepare_ptr& prepare ) {
-                  my->pbft_outgoing_prepare_channel.publish( prepare );
+                  my->pbft_outgoing_prepare_channel.publish(priority::low, prepare );
               });
 
       my->pbft_outgoing_commit_connection = my->pbft_ctrl->state_machine.pbft_outgoing_commit.connect(
               [this]( const pbft_commit_ptr& commit ) {
-                  my->pbft_outgoing_commit_channel.publish( commit );
+                  my->pbft_outgoing_commit_channel.publish(priority::low, commit );
               });
 
       my->pbft_outgoing_view_change_connection = my->pbft_ctrl->state_machine.pbft_outgoing_view_change.connect(
               [this]( const pbft_view_change_ptr& view_change ) {
-                  my->pbft_outgoing_view_change_channel.publish( view_change );
+                  my->pbft_outgoing_view_change_channel.publish(priority::low, view_change );
               });
 
       my->pbft_outgoing_new_view_connection = my->pbft_ctrl->state_machine.pbft_outgoing_new_view.connect(
               [this]( const pbft_new_view_ptr& new_view ) {
-                  my->pbft_outgoing_new_view_channel.publish( new_view );
+                  my->pbft_outgoing_new_view_channel.publish(priority::low, new_view );
               });
 
       my->pbft_outgoing_checkpoint_connection = my->pbft_ctrl->state_machine.pbft_outgoing_checkpoint.connect(
               [this]( const pbft_checkpoint_ptr& checkpoint ) {
-                  my->pbft_outgoing_checkpoint_channel.publish( checkpoint );
+                  my->pbft_outgoing_checkpoint_channel.publish(priority::low, checkpoint );
               });
 ///bos end
 
@@ -2112,7 +2112,7 @@ struct resolver_factory {
             }
          }
 
-         return optional<abi_serializer>();
+         return fc::optional<abi_serializer>();
       };
    }
 };
@@ -2622,7 +2622,9 @@ read_only::get_account_results read_only::get_account( const get_account_params&
             vector<char> data;
             copy_inline_row(*it, data);
             result.rex_info = abis.binary_to_variant( "rex_balance", data, abi_serializer_max_time, shorten_abi_errors );
-			
+			}
+      }
+		}	
    //get homepage ///bos
    if(nullptr != db.db().find<account_object,by_name>(N(personal.bos))){
       const auto& personal_account = db.db().get<account_object,by_name>( N(personal.bos) );
@@ -2644,6 +2646,7 @@ read_only::get_account_results read_only::get_account( const get_account_params&
          }
       }
    }
+   
    return result;
 }
 
@@ -2653,9 +2656,9 @@ static variant action_abi_to_variant( const abi_def& abi, type_name action_type 
    if( it != abi.structs.end() )
       to_variant( it->fields,  v );
    return v;
-};
+}
 
-read_only::abi_json_to_bin_result read_only::abi_json_to_bin( const read_only::abi_json_to_bin_params& params )const try {
+read_only::abi_json_to_bin_result read_only::abi_json_to_bin( const read_only::abi_json_to_bin_params& params )const{ try {
    abi_json_to_bin_result result;
    const auto code_account = db.db().find<account_object,by_name>( params.code );
    EOS_ASSERT(code_account != nullptr, contract_query_exception, "Contract can't be found ${contract}", ("contract", params.code));
@@ -2676,6 +2679,7 @@ read_only::abi_json_to_bin_result read_only::abi_json_to_bin( const read_only::a
    return result;
 } FC_RETHROW_EXCEPTIONS( warn, "code: ${code}, action: ${action}, args: ${args}",
                          ("code", params.code)( "action", params.action )( "args", params.args ))
+                         }
 
 read_only::abi_bin_to_json_result read_only::abi_bin_to_json( const read_only::abi_bin_to_json_params& params )const {
    abi_bin_to_json_result result;

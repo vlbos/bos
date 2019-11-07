@@ -612,7 +612,7 @@ optional<abi_serializer> mongo_db_plugin_impl::get_abi_serializer( account_name 
                   abi = from_bson( view["abi"].get_document() ).as<abi_def>();
                } catch (...) {
                   ilog( "Unable to convert account abi to abi_def for ${n}", ( "n", n ));
-                  return optional<abi_serializer>();
+                  return fc::optional<abi_serializer>();
                }
 
                purge_abi_cache(); // make room if necessary
@@ -668,7 +668,7 @@ optional<abi_serializer> mongo_db_plugin_impl::get_abi_serializer( account_name 
          }
       } FC_CAPTURE_AND_LOG((n))
    }
-   return optional<abi_serializer>();
+   return fc::optional<abi_serializer>();
 }
 
 template<typename T>

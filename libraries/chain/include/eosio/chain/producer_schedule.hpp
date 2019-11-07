@@ -3,10 +3,10 @@
 #include <eosio/chain/types.hpp>
 #include <chainbase/chainbase.hpp>
 #include <eosio/chain/authority.hpp>
-#include <eosio/chain/snapshot.hpp>
+// #include <eosio/chain/snapshot.hpp> ///bos
 
 namespace eosio { namespace chain {
-
+struct producer_authority_schedule;
    namespace legacy {
       /**
        *  Used as part of the producer_schedule_type, maps the producer name to their key.
@@ -43,6 +43,12 @@ namespace eosio { namespace chain {
          {
             return !(a==b);
          }
+         ///bos begin
+          producer_schedule_type& operator = ( const producer_authority_schedule& b )
+         {
+             return *this;///bos todo
+         }
+         ///bos end
       };
    }
 
@@ -156,6 +162,7 @@ namespace eosio { namespace chain {
       friend bool operator != ( const block_signing_authority_v0& lhs, const block_signing_authority_v0& rhs ) {
          return tie( lhs.threshold, lhs.keys ) != tie( rhs.threshold, rhs.keys );
       }
+   
    };
 
    using block_signing_authority = static_variant<block_signing_authority_v0>;
@@ -226,6 +233,33 @@ namespace eosio { namespace chain {
       friend bool operator != ( const producer_authority& lhs, const producer_authority& rhs ) {
          return tie( lhs.producer_name, lhs.authority ) != tie( rhs.producer_name, rhs.authority );
       }
+
+        /// bos begin
+      const producer_authority& block_signing_key() const {
+        return *this;
+      }
+
+      const public_key_type block_signing_key(bool flag) const {
+          public_key_type b ;
+        this->for_each_key([&](const public_key_type &key) {
+           b = key;
+        });
+        return b;
+      }
+
+      friend bool operator==(const producer_authority &lhs,const public_key_type &rhs) {
+         bool b = false;
+        lhs.for_each_key([&](const public_key_type &key) {
+          if (key == rhs) {
+             b=true;
+          }
+        });
+        return b;
+      }
+      friend bool operator==(const public_key_type &lhs,const  producer_authority&rhs) {
+        return (rhs==lhs);
+      }
+      /// bos end
    };
 
    struct producer_authority_schedule {

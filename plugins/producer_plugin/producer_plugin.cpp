@@ -1489,6 +1489,7 @@ producer_plugin_impl::start_block_result producer_plugin_impl::start_block() {
       }
 
 ///bos
+ auto signature_provider_itr = _signature_providers.find(scheduled_producer.block_signing_key(true));
       signature_provider_type signature_provider;
       if (signature_provider_itr != _signature_providers.end()) {
          signature_provider = signature_provider_itr->second;

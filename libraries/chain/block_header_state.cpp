@@ -60,7 +60,7 @@ namespace eosio { namespace chain {
       result.previous                                        = id;
       result.timestamp                                       = when;
       if (pbft_enabled) {
-        header.confirmed = 0;
+        result.confirmed = 0;
       } else {
         result.confirmed = num_prev_blocks_to_confirm;
       }
@@ -139,9 +139,9 @@ namespace eosio { namespace chain {
 
       // if( pending_schedule.schedule.producers.size() &&
       //     result.dpos_irreversible_blocknum >= pending_schedule.schedule_lib_num )
-      bool should_promote_pending = pending_schedule.producers.size();
+      bool should_promote_pending = pending_schedule.schedule.producers.size();
       if ( !pbft_enabled ) {
-          should_promote_pending = should_promote_pending && dpos_irreversible_blocknum >= pending_schedule_lib_num;
+          should_promote_pending = should_promote_pending && result.dpos_irreversible_blocknum >=  pending_schedule.schedule_lib_num;
       }
 
       if (should_promote_pending)
@@ -262,7 +262,7 @@ namespace eosio { namespace chain {
                                  const protocol_feature_set& pfs,
                                  const std::function<void( block_timestamp_type,
                                                            const flat_set<digest_type>&,
-                                                           const vector<digest_type>& )>& validator
+                                                           const vector<digest_type>& )>& validator,bool pbft_enabled
 
    )&&
    {
@@ -360,7 +360,7 @@ namespace eosio { namespace chain {
                                  const std::function<void( block_timestamp_type,
                                                            const flat_set<digest_type>&,
                                                            const vector<digest_type>& )>& validator,
-                                 bool skip_validate_signee
+                                 bool skip_validate_signee,bool pbft_enabled
    )&&
    {
       if( !additional_signatures.empty() ) {
@@ -389,7 +389,7 @@ namespace eosio { namespace chain {
                                  const std::function<void( block_timestamp_type,
                                                            const flat_set<digest_type>&,
                                                            const vector<digest_type>& )>& validator,
-                                 const signer_callback_type& signer
+                                 const signer_callback_type& signer,bool pbft_enabled
    )&&
    {
       auto pfa = prev_activated_protocol_features;

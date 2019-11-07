@@ -114,30 +114,7 @@ namespace eosio { namespace chain {
       >
    >;
 
-}}
-
-CHAINBASE_SET_INDEX_TYPE(eosio::chain::global_property_object, eosio::chain::global_property_multi_index)
-CHAINBASE_SET_INDEX_TYPE(eosio::chain::dynamic_global_property_object,
-                         eosio::chain::dynamic_global_property_multi_index)
-
-FC_REFLECT(eosio::chain::global_property_object,
-            (proposed_schedule_block_num)(proposed_schedule)(configuration)(chain_id)
-          )
-
-FC_REFLECT(eosio::chain::legacy::snapshot_global_property_object_v2,
-            (proposed_schedule_block_num)(proposed_schedule)(configuration)
-          )
-
-FC_REFLECT(eosio::chain::snapshot_global_property_object,
-            (proposed_schedule_block_num)(proposed_schedule)(configuration)(chain_id)
-          )
-
-FC_REFLECT(eosio::chain::dynamic_global_property_object,
-            (global_action_sequence)
-          )
-		  
-
-   // *bos*
+ //bos begin
    class global_property2_object : public chainbase::object<global_property2_object_type, global_property2_object>
    {
       OBJECT_CTOR(global_property2_object, (cfg))
@@ -165,8 +142,6 @@ FC_REFLECT(eosio::chain::dynamic_global_property_object,
       chain_config3                 configuration;
    };
 
-
-   // *bos*
    using global_property2_multi_index = chainbase::shared_multi_index_container<
       global_property2_object,
       indexed_by<
@@ -194,16 +169,9 @@ FC_REFLECT(eosio::chain::dynamic_global_property_object,
       >
    >;
 }}
-
-CHAINBASE_SET_INDEX_TYPE(eosio::chain::global_property_object, eosio::chain::global_property_multi_index)
-CHAINBASE_SET_INDEX_TYPE(eosio::chain::dynamic_global_property_object,
-                         eosio::chain::dynamic_global_property_multi_index)
-// *bos*
 CHAINBASE_SET_INDEX_TYPE(eosio::chain::global_property2_object, eosio::chain::global_property2_multi_index)
 CHAINBASE_SET_INDEX_TYPE(eosio::chain::upgrade_property_object, eosio::chain::upgrade_property_multi_index)
 CHAINBASE_SET_INDEX_TYPE(eosio::chain::global_property3_object, eosio::chain::global_property3_multi_index)
-
-// *bos*
 FC_REFLECT(eosio::chain::global_property2_object,
            (cfg)(gmr)
           )
@@ -212,5 +180,26 @@ FC_REFLECT(eosio::chain::upgrade_property_object,
           )
 FC_REFLECT(eosio::chain::global_property3_object,
            (configuration)
-)
+		   )
+		   ///bos end
+		   
+CHAINBASE_SET_INDEX_TYPE(eosio::chain::global_property_object, eosio::chain::global_property_multi_index)
+CHAINBASE_SET_INDEX_TYPE(eosio::chain::dynamic_global_property_object,
+                         eosio::chain::dynamic_global_property_multi_index)
+
+FC_REFLECT(eosio::chain::global_property_object,
+            (proposed_schedule_block_num)(proposed_schedule)(configuration)(chain_id)
+          )
+
+FC_REFLECT(eosio::chain::legacy::snapshot_global_property_object_v2,
+            (proposed_schedule_block_num)(proposed_schedule)(configuration)
+          )
+
+FC_REFLECT(eosio::chain::snapshot_global_property_object,
+            (proposed_schedule_block_num)(proposed_schedule)(configuration)(chain_id)
+          )
+
+FC_REFLECT(eosio::chain::dynamic_global_property_object,
+            (global_action_sequence)
+          )
 

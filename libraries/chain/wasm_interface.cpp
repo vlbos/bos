@@ -1897,7 +1897,8 @@ class call_depth_api : public context_aware_api {
       }
 };
 
-
+///bos begin
+/*eos todo
 class action_seed_api  : public context_aware_api {
 public:
     action_seed_api(apply_context& ctx)
@@ -1971,7 +1972,8 @@ private:
 REGISTER_INTRINSICS(action_seed_api,
 (bpsig_action_time_seed,  int(int, int)               )
 );
-
+*/
+///bos end
 REGISTER_INJECTED_INTRINSICS(call_depth_api,
    (call_depth_assert,  void() )
 );

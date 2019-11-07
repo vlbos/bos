@@ -117,7 +117,7 @@ namespace eosio {
                >,
                composite_key_compare< std::less<uint32_t>, sha256_less >
          >,
-         ordered_non_unique< tag<by_block_id>,
+         ordered_non_unique< tag<eosio::by_block_id>,
                composite_key< peer_block_state,
                      member<peer_block_state, block_id_type, &eosio::peer_block_state::id>,
                      member<peer_block_state, bool, &eosio::peer_block_state::have_block>
@@ -163,7 +163,7 @@ namespace eosio {
       bool verify_catchup( const connection_ptr& c, uint32_t num, const block_id_type& id );
 
    public:
-      explicit sync_manager( uint32_t span );
+      explicit sync_manager(uint32_t span );
       static void send_handshakes();
       bool syncing_with_peer() const { return sync_state == lib_catchup; }
       void sync_reset_lib_num( const connection_ptr& conn );
@@ -227,13 +227,13 @@ struct p2p_peer_record{
    ///bos
    private:
       std::vector<char> compress_pbft(const std::shared_ptr<std::vector<char>>& m)const;
-      std::vector<char> decompress_pbft(const std::vector<char>& m)const;
       std::shared_ptr<std::vector<char>> encode_pbft_message(const net_message &msg, bool compress = false)const;
 	  ///bos end
    public:
    ///bos
- net_plugin_impl();
+         std::vector<char> decompress_pbft(const std::vector<char>& m)const;
       map<string,p2p_peer_record>           p2p_peer_records;
+ net_plugin_impl();
       bool p2p_discoverable;
       bool request_p2p_flag=true;
 	  ///bos end
@@ -305,7 +305,8 @@ struct p2p_peer_record{
       const int                     pbft_message_cache_TTL = 600;
       const int                     pbft_message_TTL = 60;
 
-      channels::transaction_ack::channel_type::handle  incoming_transaction_ack_subscription;      eosio::chain::plugin_interface::pbft::outgoing::prepare_channel::channel_type::handle pbft_outgoing_prepare_subscription;
+ 
+      eosio::chain::plugin_interface::pbft::outgoing::prepare_channel::channel_type::handle pbft_outgoing_prepare_subscription;
       eosio::chain::plugin_interface::pbft::outgoing::commit_channel::channel_type::handle pbft_outgoing_commit_subscription;
       eosio::chain::plugin_interface::pbft::outgoing::view_change_channel::channel_type::handle pbft_outgoing_view_change_subscription;
       eosio::chain::plugin_interface::pbft::outgoing::new_view_channel::channel_type::handle pbft_outgoing_new_view_subscription;
@@ -759,7 +760,7 @@ struct p2p_peer_record{
       void enqueue_buffer( const std::shared_ptr<std::vector<char>>& send_buffer,
                            bool trigger_send, int priority, go_away_reason close_after_send,
                            bool to_sync_queue = false);
-      void enqueue_pbft( const std::shared_ptr<std::vector<char>>& m, const time_point_sec deadline);///bos
+      void enqueue_pbft( const std::shared_ptr<std::vector<char>>& m, const time_point_sec deadline, int priority);///bos
 
       bool pbft_read_to_send();///bos
       void cancel_sync(go_away_reason);
@@ -1048,7 +1049,7 @@ struct p2p_peer_record{
       self->socket.reset( new tcp::socket( my_impl->thread_pool->get_executor() ) );
       self->flush_queues();
       self->connecting = false;
-      connecting_deadline = fc::time_point::min();///bos
+      self->connecting_deadline = fc::time_point::min();///bos
       self->syncing = false;
       self->consecutive_rejected_blocks = 0;
       ++self->consecutive_immediate_connection_close;
@@ -1289,7 +1290,7 @@ struct p2p_peer_record{
             if (conn) {
                 if (close_after_send != no_reason) {
                     elog ("sent a go away message: ${r}, closing connection to ${p}",("r", reason_str(close_after_send))("p", conn->peer_name()));
-                    my_impl->close(conn);
+                    conn->close();
                     return;
                 }
             } else {
@@ -1441,11 +1442,11 @@ struct p2p_peer_record{
    }
 
 ///bos begin
-   void connection::enqueue_pbft(const std::shared_ptr<std::vector<char>>& m, const time_point_sec deadline)
+   void connection::enqueue_pbft(const std::shared_ptr<std::vector<char>>& m, const time_point_sec deadline, int priority)
    {
        pbft_queue.push_back(queued_pbft_message{m, deadline });
        if (buffer_queue.is_out_queue_empty()) {
-           do_queue_write();
+           do_queue_write(priority);
        }
    }
 ///bos end
@@ -1523,14 +1524,14 @@ struct p2p_peer_record{
 
    //-----------------------------------------------------------
 
-    sync_manager::sync_manager( uint32_t req_span )
+    sync_manager::sync_manager(uint32_t req_span )
       :sync_known_lib_num( 0 )
       ,sync_last_requested_num( 0 )
       ,sync_next_expected_num( 1 )
       ,sync_req_span( req_span )
       ,sync_source()
       ,sync_state(in_sync)
-   {
+    {
    }
 
    constexpr auto sync_manager::stage_str(stages s) {
@@ -1568,7 +1569,7 @@ struct p2p_peer_record{
    }
 ///bos begin
    bool sync_manager::is_syncing() {
-       return state != in_sync;
+       return sync_state != in_sync;
    }
    ///bos end
    // call with g_sync locked
@@ -1716,14 +1717,14 @@ struct p2p_peer_record{
 
 ///bos begin
    void sync_manager::sync_stable_checkpoints(const connection_ptr& c, uint32_t target) {
-       controller& cc = chain_plug->chain();
+       controller& cc = my_impl->chain_plug->chain();
        uint32_t lscb_num = cc.last_stable_checkpoint_block_num();
        auto head_num = cc.head_block_num();
        if (last_req_scp_num < lscb_num
           || last_req_scp_num == 0
           || last_req_scp_num > target) last_req_scp_num = lscb_num;
 
-       auto pbft_checkpoint_granularity = chain_plug->pbft_ctrl().pbft_db.get_checkpoint_interval();
+       auto pbft_checkpoint_granularity = my_impl->chain_plug->pbft_ctrl().pbft_db.get_checkpoint_interval();
        auto end = target;
        auto max_target_scp_num = last_req_scp_num + pbft_checkpoint_granularity * 10;
        if (target > max_target_scp_num) end = std::min(max_target_scp_num, head_num);
@@ -1829,7 +1830,7 @@ struct p2p_peer_record{
                                         msg_head_num = msg.head_num, msg_head_id = msg.head_id]() {
             bool on_fork = true;
             try {
-               controller& cc = chain_plug->chain();
+               controller& cc = my_impl->chain_plug->chain();
                on_fork = cc.get_block_id_for_num( msg_head_num ) != msg_head_id;
             } catch( ... ) {}
             if( on_fork ) {
@@ -2028,7 +2029,7 @@ struct p2p_peer_record{
    bool dispatch_manager::have_block( const block_id_type& blkid ) const {
       std::lock_guard<std::mutex> g(blk_state_mtx);
       // by_block_id sorts have_block by greater so have_block == true will be the first one found
-      const auto& index = blk_state.get<by_block_id>();
+      const auto& index = blk_state.get<eosio::by_block_id>();
       auto blk_itr = index.find( blkid );
       if( blk_itr != index.end() ) {
          return blk_itr->have_block;
@@ -2461,14 +2462,14 @@ struct p2p_peer_record{
       }
       connecting = true;
       pending_message_buffer.reset();
-      connecting_deadline = fc::time_point::now()+fc::seconds(c->connecting_timeout_in_seconds);///bos
+      connecting_deadline = fc::time_point::now()+fc::seconds(connecting_timeout_in_seconds);///bos
       boost::asio::async_connect( *socket, endpoints,
          boost::asio::bind_executor( strand,
                [resolver, c = shared_from_this(), socket=socket]( const boost::system::error_code& err, const tcp::endpoint& endpoint ) {
             if( !err && socket->is_open() ) {
                if( c->start_session() ) {
                   c->send_handshake();
-                  send_p2p_request(c);///bos
+                  c->send_p2p_request(my_impl->p2p_discoverable);///bos
                   }
             } else {
                fc_elog( logger, "connection failed to ${peer}: ${error}", ("peer", c->peer_name())( "error", err.message()));
@@ -2481,7 +2482,7 @@ struct p2p_peer_record{
    {
          if (p2p_discoverable && request_p2p_flag)
          {
-               auto peer_record = p2p_peer_records.find(c->peer_addr);
+               auto peer_record = p2p_peer_records.find(c->peer_address());
                if (peer_record != p2p_peer_records.end())
                {
                      if (peer_record->second.is_config && !peer_record->second.connected)
@@ -2797,23 +2798,23 @@ struct p2p_peer_record{
    }
 
 ///bos begin
-   void connection::handle_message( connection_ptr c, const request_p2p_message &msg){
-      peer_ilog(c, "received request_p2p_message");
+   void connection::handle_message(  const request_p2p_message &msg){
+      peer_ilog(this,"received request_p2p_message");
       string rspm;
-      for(auto sd :p2p_peer_records){
+      for(auto sd :my_impl->p2p_peer_records){
             if(sd.second.discoverable){
                   rspm.append(sd.second.peer_address+"#");
             }
       }
-      if(p2p_discoverable||rspm.size()>0){
-            c->send_p2p_response(p2p_discoverable,rspm);
+      if(my_impl->p2p_discoverable||rspm.size()>0){
+            send_p2p_response(my_impl->p2p_discoverable,rspm);
       }
    }
 
-   void connection::handle_message( connection_ptr c, const response_p2p_message &msg){
-      peer_ilog(c, "received response_p2p_message");
-      auto peer_record=p2p_peer_records.find(c->peer_addr);
-      if(peer_record!=p2p_peer_records.end()){
+   void connection::handle_message(const response_p2p_message &msg){
+      peer_ilog(this,"received response_p2p_message");
+      auto peer_record=my_impl->p2p_peer_records.find(peer_addr);
+      if(peer_record!=my_impl->p2p_peer_records.end()){
       peer_record->second.discoverable=msg.discoverable;
       if (peer_record->second.is_config&&msg.p2p_peer_list.length()>0){
 
@@ -2824,7 +2825,7 @@ struct p2p_peer_record{
             string peer_list;
             while( idx != std::string::npos )
             {
-                  if(max_nodes_per_host<=connections.size()||max_nodes_per_host<=p2p_peer_records.size()){
+                  if(my_impl->max_nodes_per_host<=my_impl->connections.size()||my_impl->max_nodes_per_host<=my_impl->p2p_peer_records.size()){
                         return;
                   }
                   peer_list=msg.p2p_peer_list.substr(start, idx-start);
@@ -2833,17 +2834,19 @@ struct p2p_peer_record{
                   }
                   start = idx+delim.size();
                   idx = msg.p2p_peer_list.find(delim, start);
-                  if( find_connection( peer_list ))
-                  continue;
+                  if( my_impl->find_connection( peer_list ))
+                  {
+                     continue;
+                  }
                   p2p_peer_record p2prcd;
                   p2prcd.peer_address=peer_list;
                   p2prcd.discoverable=false;
                   p2prcd.is_config=true;
                   p2prcd.connected=false;
-                  p2p_peer_records.insert(pair<string,p2p_peer_record>(peer_list,p2prcd));
+                  my_impl->p2p_peer_records.insert(pair<string,p2p_peer_record>(peer_list,p2prcd));
                   connection_ptr c = std::make_shared<connection>(peer_list);
                   fc_dlog(logger,"adding new connection to the list");
-                  connections.insert( c );
+                  my_impl->connections.insert( c );
               }}}
    }
 ///bos end
@@ -3155,9 +3158,9 @@ struct p2p_peer_record{
 
        if ( msg.end_block == 0 || msg.end_block < msg.start_block) return;
 
-       fc_dlog(logger, "received checkpoint request message ${m}, from ${p}", ("m", msg)("p", c->peer_name()));
+       fc_dlog(logger, "received checkpoint request message ${m}, from ${p}", ("m", msg)("p", peer_name()));
 
-       if ( msg.end_block - msg.start_block > chain_plug->pbft_ctrl().pbft_db.get_checkpoint_interval() * 100) {
+       if ( msg.end_block - msg.start_block > my_impl->chain_plug->pbft_ctrl().pbft_db.get_checkpoint_interval() * 100) {
            fc_dlog(logger, "request range too large");
            return;
        }
@@ -3183,7 +3186,7 @@ struct p2p_peer_record{
        if (!scp_stack.empty()) fc_dlog(logger, "sending ${n} stable checkpoints on my node",("n",scp_stack.size()));
 
        while (scp_stack.size()) {
-           c->enqueue(scp_stack.back());
+           enqueue(scp_stack.back());
            scp_stack.pop_back();
        }
    }
@@ -3258,12 +3261,12 @@ struct p2p_peer_record{
 
 ///bos begin
       auto accept_pbft_stable_checkpoint = [&]() {
-          auto &pcc = chain_plug->pbft_ctrl();
+          auto &pcc = my_impl->chain_plug->pbft_ctrl();
           auto scp = pcc.pbft_db.fetch_stable_checkpoint_from_blk_extn(msg);
 
           if (!scp.empty() && scp.block_info.block_num() > cc.last_stable_checkpoint_block_num()) {
               if (pcc.pbft_db.get_stable_checkpoint_by_id(msg->id(), false).empty()) {
-                  handle_message(c, scp);
+                  handle_message(scp);
               } else {
                   pcc.pbft_db.checkpoint_local();
               }
@@ -3273,10 +3276,10 @@ struct p2p_peer_record{
       try {
          if( cc.fetch_block_by_id(blk_id) ) {
             c->strand.post( [sync_master = my_impl->sync_master.get(),
-                             dispatcher = my_impl->dispatcher.get(), c, blk_id, blk_num]() {
+                             dispatcher = my_impl->dispatcher.get(), c, blk_id, blk_num,accept_pbft_stable_checkpoint]() {
                dispatcher->add_peer_block( blk_id, c->connection_id );
                sync_master->sync_recv_block( c, blk_id, blk_num );
-			               accept_pbft_stable_checkpoint();////bos
+			         accept_pbft_stable_checkpoint();////bos
             });
             return;
          }
@@ -3354,7 +3357,7 @@ struct p2p_peer_record{
 
         for (auto &conn: connections) {
             if (conn != c && conn->pbft_ready()) {
-                conn->enqueue_pbft(encode_pbft_message(msg), deadline);
+                conn->enqueue_pbft(encode_pbft_message(msg), deadline,priority::low);
             }
         }
     }
@@ -3423,39 +3426,39 @@ struct p2p_peer_record{
     }
 
     void connection::handle_message( const pbft_prepare &msg) {
-       if (is_pbft_msg_valid(msg) && maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
-           auto pmm = pbft_message_metadata<pbft_prepare>(msg, chain_id);
+       if (my_impl->is_pbft_msg_valid(msg) && my_impl->maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
+           auto pmm = pbft_message_metadata<pbft_prepare>(msg, my_impl->chain_id);
 
            pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
            if (!pcc.pbft_db.is_valid_prepare(pmm.msg, pmm.sender_key)) return;
 
-           bcast_pbft_msg(pmm.msg, pbft_message_TTL, c);
+           my_impl->bcast_pbft_msg(pmm.msg, my_impl->pbft_message_TTL, shared_from_this());
            fc_dlog(logger, "received prepare at height: ${n}, view: ${v}, from ${k}, ",
                    ("n", pmm.msg.block_info.block_num())("v", pmm.msg.view)("k", pmm.sender_key));
 
-           pbft_incoming_prepare_channel.publish(std::make_shared<pbft_message_metadata<pbft_prepare>>(std::move(pmm)));
+           my_impl->pbft_incoming_prepare_channel.publish(priority::low,std::make_shared<pbft_message_metadata<pbft_prepare>>(std::move(pmm)));
        }
 
     }
 
     void connection::handle_message( const pbft_commit &msg) {
-       if (is_pbft_msg_valid(msg) && maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
-           auto pmm = pbft_message_metadata<pbft_commit>(msg, chain_id);
+       if (my_impl->is_pbft_msg_valid(msg) && my_impl->maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
+           auto pmm = pbft_message_metadata<pbft_commit>(msg, my_impl->chain_id);
 
            pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
            if (!pcc.pbft_db.is_valid_commit(pmm.msg, pmm.sender_key)) return;
 
-           bcast_pbft_msg(pmm.msg, pbft_message_TTL, c);
+           my_impl->bcast_pbft_msg(pmm.msg, my_impl->pbft_message_TTL, shared_from_this());
            fc_dlog(logger, "received commit at height: ${n}, view: ${v}, from ${k}, ",
                    ("n", pmm.msg.block_info.block_num())("v", pmm.msg.view)("k", pmm.sender_key));
 
-           pbft_incoming_commit_channel.publish(std::make_shared<pbft_message_metadata<pbft_commit>>(std::move(pmm)));
+           my_impl->pbft_incoming_commit_channel.publish(priority::low,std::make_shared<pbft_message_metadata<pbft_commit>>(std::move(pmm)));
        }
     }
 
     void connection::handle_message( const pbft_view_change &msg) {
-       if (is_pbft_msg_valid(msg) && maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
-           auto pmm = pbft_message_metadata<pbft_view_change>(msg, chain_id);
+       if (my_impl->is_pbft_msg_valid(msg) && my_impl->maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
+           auto pmm = pbft_message_metadata<pbft_view_change>(msg, my_impl->chain_id);
 
            pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
            controller &ctrl = my_impl->chain_plug->chain();
@@ -3474,50 +3477,50 @@ struct p2p_peer_record{
                }
                req.req_trx.mode = normal;
                req.req_blocks.mode = normal;
-               c->enqueue(req);
+               enqueue(req);
            }
 
-           bcast_pbft_msg(pmm.msg, pbft_message_TTL, c);
+           my_impl->bcast_pbft_msg(pmm.msg, my_impl->pbft_message_TTL,  shared_from_this());
            fc_dlog(logger, "received view change {cv: ${cv}, tv: ${tv}} from ${v}",
                    ("cv", pmm.msg.current_view)("tv", pmm.msg.target_view)("v", pmm.sender_key));
 
-           pbft_incoming_view_change_channel.publish(std::make_shared<pbft_message_metadata<pbft_view_change>>(std::move(pmm)));
+           my_impl->pbft_incoming_view_change_channel.publish(priority::low,std::make_shared<pbft_message_metadata<pbft_view_change>>(std::move(pmm)));
        }
     }
 
     void connection::handle_message( const pbft_new_view &msg) {
 
-       if (maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
+       if (my_impl->maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
 
            pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
 
-           if (time_point_sec(time_point::now()) > time_point_sec(msg.common.timestamp) + 60 * pbft_message_TTL
+           if (time_point_sec(time_point::now()) > time_point_sec(msg.common.timestamp) + 60 * my_impl->pbft_message_TTL
                || msg.new_view <= pcc.state_machine.get_current_view()) {
                //skip new view messages that are too old or whose target views are lower than mine.
                return;
            }
 
-           auto pmm = pbft_message_metadata<pbft_new_view>(msg, chain_id);
+           auto pmm = pbft_message_metadata<pbft_new_view>(msg, my_impl->chain_id);
 
            if (pmm.sender_key != pcc.pbft_db.get_new_view_primary_key(pmm.msg.new_view)) return;
 
-           bcast_pbft_msg(pmm.msg, 60 * pbft_message_TTL, c);
+           my_impl->bcast_pbft_msg(pmm.msg, 60 * my_impl->pbft_message_TTL, shared_from_this());
            fc_dlog(logger, "received new view: ${n}, from ${v}", ("n", pmm.msg)("v", pmm.sender_key));
 
-           pbft_incoming_new_view_channel.publish(std::make_shared<pbft_message_metadata<pbft_new_view>>(std::move(pmm)));
+           my_impl->pbft_incoming_new_view_channel.publish(priority::low,std::make_shared<pbft_message_metadata<pbft_new_view>>(std::move(pmm)));
        }
     }
 
     void connection::handle_message( const compressed_pbft_message &msg) {
 
-        auto decompressed_msg = decompress_pbft(msg.content);
+        auto decompressed_msg = my_impl->decompress_pbft(msg.content);
 
         net_message message;
         fc::datastream<const char *> ds(decompressed_msg.data(), decompressed_msg.size());
         fc::raw::unpack(ds, message);
 
         try {
-            msg_handler m(*this, c);
+            msg_handler m(shared_from_this());
             message.visit( m );
         } catch(  const fc::exception& e ) {
             edump((e.to_detail_string() ));
@@ -3525,17 +3528,17 @@ struct p2p_peer_record{
     }
 
     void connection::handle_message( const pbft_checkpoint &msg) {
-       if (is_pbft_msg_valid(msg) && maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
-           auto pmm = pbft_message_metadata<pbft_checkpoint>(msg, chain_id);
+       if (my_impl->is_pbft_msg_valid(msg) && my_impl->maybe_add_to_pbft_cache(std::string(msg.sender_signature))) {
+           auto pmm = pbft_message_metadata<pbft_checkpoint>(msg, my_impl->chain_id);
 
            pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
            if (!pcc.pbft_db.is_valid_checkpoint(pmm.msg, pmm.sender_key)) return;
 
-           bcast_pbft_msg(pmm.msg, pbft_message_TTL, c);
+           my_impl->bcast_pbft_msg(pmm.msg, my_impl->pbft_message_TTL, shared_from_this());
            fc_dlog(logger, "received checkpoint at ${n}, from ${v}",
                    ("n", pmm.msg.block_info.block_num())("v", pmm.sender_key));
 
-           pbft_incoming_checkpoint_channel.publish(std::make_shared<pbft_message_metadata<pbft_checkpoint>>(std::move(pmm)));
+           my_impl->pbft_incoming_checkpoint_channel.publish(priority::low,std::make_shared<pbft_message_metadata<pbft_checkpoint>>(std::move(pmm)));
        }
     }
 
@@ -3544,8 +3547,7 @@ struct p2p_peer_record{
        pbft_controller &pcc = my_impl->chain_plug->pbft_ctrl();
 
        if (!pcc.pbft_db.is_valid_stable_checkpoint(msg, true)) return;
-       fc_ilog(logger, "received stable checkpoint at ${n}, from ${v}",
-               ("n", msg.block_info.block_num())("v", c->peer_name()));
+       fc_ilog(logger, "received stable checkpoint at ${n}, from ${v}",("n", msg.block_info.block_num())("v", peer_name()));
     }
 
 ///bos end
@@ -3678,7 +3680,7 @@ struct p2p_peer_record{
             }
          }else if((*it)->connecting && (*it)->connecting_deadline < fc::time_point::now()){///bos
              if( (*it)->peer_address().length() > 0) {
-                 close(*it);
+                 (*it)->close();
              }
              else {
                  it = connections.erase(it);

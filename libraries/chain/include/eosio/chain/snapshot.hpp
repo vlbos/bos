@@ -6,7 +6,6 @@
 #include <fc/variant_object.hpp>
 #include <boost/core/demangle.hpp>
 #include <ostream>
-
 namespace eosio { namespace chain {
    /**
     * History:
@@ -224,7 +223,7 @@ namespace eosio { namespace chain {
 
          void provide(std::istream& in) const override {
              row_validation_helper::apply(data, [&in,this](){
-                 if(typeid(T)== typeid(eosio::chain::block_header_state)){
+                 if(typeid(T)== typeid(block_header_state)){
                      std::ostringstream sstream;
                      sstream << in.rdbuf();
                      std::string str(sstream.str());

@@ -135,7 +135,9 @@ namespace eosio { namespace chain {
          ~controller();
 
          void add_indices();
-         void startup( std::function<bool()> shutdown, const snapshot_reader_ptr& snapshot = nullptr );
+         void startup( std::function<bool()> shutdown, const snapshot_reader_ptr& snapshot);
+         void startup( std::function<bool()> shutdown, const genesis_state& genesis);
+         void startup( std::function<bool()> shutdown);
 
          void preactivate_feature( const digest_type& feature_digest );
 
@@ -149,15 +151,15 @@ namespace eosio { namespace chain {
           *
           *  Will only activate protocol features that have been pre-activated.
           */
-         void start_block( block_timestamp_type time = block_timestamp_type(), uint16_t confirm_block_count = 0, std::function<signature_type(digest_type)> signer = nullptr );///bos
-
+         void start_block( block_timestamp_type time = block_timestamp_type(), uint16_t confirm_block_count = 0);
          /**
           * Starts a new pending block session upon which new transactions can
           * be pushed.
           */
          void start_block( block_timestamp_type time,
                            uint16_t confirm_block_count,
-                           const vector<digest_type>& new_protocol_feature_activations );
+                           const vector<digest_type>& new_protocol_feature_activations , std::function<signature_type(digest_type)> signer = nullptr );///bos
+
 
          /**
           * @return transactions applied in aborted block
@@ -198,19 +200,21 @@ namespace eosio { namespace chain {
 
 
          const fork_database& fork_db()const;
-		 ///bos begin
-         void pbft_commit_local( const block_id_type& id );
+         /// bos begin
+         void pbft_commit_local(const block_id_type &id);
 
          bool pending_pbft_lib();
 
          vector<uint32_t> get_watermarks() const;
 
-         void set_pbft_latest_checkpoint( const block_id_type& id );
-         uint32_t last_stable_checkpoint_block_num()const;
-         block_id_type last_stable_checkpoint_block_id()const;
-         std::map<chain::public_key_type, signature_provider_type> my_signature_providers()const;
-         void set_my_signature_providers(std::map<chain::public_key_type, signature_provider_type> msp);
-		 ///bos end
+         void set_pbft_latest_checkpoint(const block_id_type &id);
+         uint32_t last_stable_checkpoint_block_num() const;
+         block_id_type last_stable_checkpoint_block_id() const;
+         std::map<chain::public_key_type, signature_provider_type>
+         my_signature_providers() const;
+         void set_my_signature_providers(
+             std::map<chain::public_key_type, signature_provider_type> msp);
+         /// bos end
 
          const account_object&                 get_account( account_name n )const;
          const global_property_object&         get_global_properties()const;
@@ -339,7 +343,7 @@ namespace eosio { namespace chain {
 		 ///bos begin
          path state_dir()const;
          path blocks_dir()const;
-         producer_schedule_type initial_schedule()const;
+         legacy::producer_schedule_type initial_schedule()const;
          bool is_replaying()const;
 
          void set_pbft_prepared(const block_id_type& id);
@@ -371,8 +375,6 @@ namespace eosio { namespace chain {
          signal<void(std::tuple<const transaction_trace_ptr&, const signed_transaction&>)> applied_transaction;
          signal<void(const int&)>                      bad_alloc;
 
-
-
          /*
          signal<void()>                                  pre_apply_block;
          signal<void()>                                  post_apply_block;
@@ -387,7 +389,7 @@ namespace eosio { namespace chain {
          wasm_interface& get_wasm_interface();
 
 
-         optional<abi_serializer> get_abi_serializer( account_name n, const fc::microseconds& max_serialization_time )const {
+         fc::optional<abi_serializer> get_abi_serializer( account_name n, const fc::microseconds& max_serialization_time )const {
             if( n.good() ) {
                try {
                   const auto& a = get_account( n );
@@ -396,7 +398,7 @@ namespace eosio { namespace chain {
                      return abi_serializer( abi, max_serialization_time );
                } FC_CAPTURE_AND_LOG((n))
             }
-            return optional<abi_serializer>();
+            return fc::optional<abi_serializer>();
          }
 
          template<typename T>
