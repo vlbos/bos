@@ -2015,6 +2015,37 @@ read_only::get_account_results read_only::get_account( const get_account_params&
    return result;
 }
 
+read_only::get_unused_accounts_results read_only::get_unused_accounts( const get_unused_accounts_params& params ) const {
+
+   get_unused_accounts_results results;
+
+   const auto& idx = db.db().get_index<account_sequence_index,by_name>();
+   auto lower = idx.lower_bound( N(1) );
+   auto upper = idx.upper_bound( N(zzzzzzzzzzzz) );
+
+   fc::path          file = params.file_path != "" ? params.file_path : "nonactivated_bos_accounts.txt";
+   std::fstream      file_stream;
+   file_stream.open( file.generic_string().c_str(), std::ios::out );
+
+   auto start = fc::time_point::now();
+
+   auto itr = lower;
+   for ( ; itr != upper; ++itr ){
+      if ( 0 == itr->auth_sequence  ){
+         auto str = itr->name.to_string();
+         if ( str.length() == 12 && str.find('.') == std::string::npos ){
+            str += "\n";
+            file_stream.write((char*)&str, sizeof(str));
+         }
+      }
+      ilog( "----- ${name} -- auth_sequence: ${seq} -----", ("name", itr->name)("seq", itr->auth_sequence));
+   }
+
+   results.block_height = db.fork_db_head_block_num(),
+   results.time_used = std::to_string( double((fc::time_point::now() - start).count()) / 1000 ) + " ms";
+   return results;
+}
+
 static variant action_abi_to_variant( const abi_def& abi, type_name action_type ) {
    variant v;
    auto it = std::find_if(abi.structs.begin(), abi.structs.end(), [&](auto& x){return x.name == action_type;});

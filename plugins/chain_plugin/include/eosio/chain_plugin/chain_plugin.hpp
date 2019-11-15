@@ -151,6 +151,17 @@ public:
    };
    get_account_results get_account( const get_account_params& params )const;
 
+   struct get_unused_accounts_results {
+      uint32_t block_height;
+      string   time_used;
+   };
+
+   struct get_unused_accounts_params {
+      string file_path;
+   };
+
+   get_unused_accounts_results get_unused_accounts( const get_unused_accounts_params& params )const;
+
 
    struct get_code_results {
       name                   account_name;
@@ -763,3 +774,7 @@ FC_REFLECT( eosio::chain_apis::read_only::abi_bin_to_json_params, (code)(action)
 FC_REFLECT( eosio::chain_apis::read_only::abi_bin_to_json_result, (args) )
 FC_REFLECT( eosio::chain_apis::read_only::get_required_keys_params, (transaction)(available_keys) )
 FC_REFLECT( eosio::chain_apis::read_only::get_required_keys_result, (required_keys) )
+
+
+FC_REFLECT( eosio::chain_apis::read_only::get_unused_accounts_results,(block_height)(time_used) )
+FC_REFLECT( eosio::chain_apis::read_only::get_unused_accounts_params, (file_path) )
