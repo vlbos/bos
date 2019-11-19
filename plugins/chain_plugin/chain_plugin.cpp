@@ -2024,23 +2024,27 @@ read_only::get_unused_accounts_results read_only::get_unused_accounts( const get
    auto upper = idx.upper_bound( N(zzzzzzzzzzzz) );
 
    fc::path          file = params.file_path != "" ? params.file_path : "nonactivated_bos_accounts.txt";
-   std::fstream      file_stream;
-   file_stream.open( file.generic_string().c_str(), std::ios::out );
+   std::ofstream      file_stream(file.generic_string().c_str());
+
+   fc::path          cfile = params.file_path != "" ? params.file_path : "account_auth_seq.csv";
+   std::ofstream      cfile_stream(cfile.generic_string().c_str());
 
    auto start = fc::time_point::now();
 
    auto itr = lower;
    for ( ; itr != upper; ++itr ){
-      if ( 0 == itr->auth_sequence  ){
+       if ( 0 == itr->auth_sequence  ){
          auto str = itr->name.to_string();
          if ( str.length() == 12 && str.find('.') == std::string::npos ){
-            str += "\n";
-            file_stream.write((char*)&str, sizeof(str));
+            file_stream << str << std::endl;
          }
       }
-      ilog( "----- ${name} -- auth_sequence: ${seq} -----", ("name", itr->name)("seq", itr->auth_sequence));
+      ilog("----- ${name} -- auth_sequence: ${seq} -----",("name", itr->name)("seq", itr->auth_sequence));
+      cfile_stream << itr->name.to_string() << "," << itr->auth_sequence << std::endl;
    }
-
+   
+   file_stream.close();
+   cfile_stream.close();
    results.block_height = db.fork_db_head_block_num(),
    results.time_used = std::to_string( double((fc::time_point::now() - start).count()) / 1000 ) + " ms";
    return results;
