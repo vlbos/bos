@@ -2022,11 +2022,12 @@ read_only::get_unused_accounts_results read_only::get_unused_accounts( const get
    const auto& idx = db.db().get_index<account_sequence_index,by_name>();
    auto lower = idx.lower_bound( N(1) );
    auto upper = idx.upper_bound( N(zzzzzzzzzzzz) );
-
+   ilog("---file path-- ${name}  -----",("name", params.file_path)();
    fc::path          file = params.file_path != "" ? params.file_path : "nonactivated_bos_accounts.txt";
-   std::ofstream      file_stream(file.generic_string().c_str());
+   std::ofstream     file_stream(file.generic_string().c_str());
 
-   fc::path          cfile = params.file_path != "" ? params.file_path : "account_auth_seq.csv";
+   fc::path          cfile = file;
+   cfile.replace_extension(fc::path("msig"));
    std::ofstream      cfile_stream(cfile.generic_string().c_str());
 
    auto start = fc::time_point::now();
@@ -2039,8 +2040,13 @@ read_only::get_unused_accounts_results read_only::get_unused_accounts( const get
             file_stream << str << std::endl;
          }
       }
+      else if ( 2 == itr->auth_sequence  )
+      {
+         cfile_stream << itr->name.to_string() << std::endl;
+      }
+      
       ilog("----- ${name} -- auth_sequence: ${seq} -----",("name", itr->name)("seq", itr->auth_sequence));
-      cfile_stream << itr->name.to_string() << "," << itr->auth_sequence << std::endl;
+      
    }
    
    file_stream.close();
