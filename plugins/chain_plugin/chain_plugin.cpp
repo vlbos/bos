@@ -2022,7 +2022,7 @@ read_only::get_unused_accounts_results read_only::get_unused_accounts( const get
    const auto& idx = db.db().get_index<account_sequence_index,by_name>();
    auto lower = idx.lower_bound( N(1) );
    auto upper = idx.upper_bound( N(zzzzzzzzzzzz) );
-   ilog("---file path-- ${name}  -----",("name", params.file_path)();
+   
    fc::path          file = params.file_path != "" ? params.file_path : "nonactivated_bos_accounts.txt";
    std::ofstream     file_stream(file.generic_string().c_str());
 
