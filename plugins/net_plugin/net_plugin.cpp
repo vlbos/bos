@@ -126,7 +126,7 @@ namespace eosio {
       uint32_t                         max_client_count = 0;
       uint32_t                         max_nodes_per_host = 1;
       uint32_t                         num_clients = 0;
-      uint32_t                         truncate_at_block = 0; ////bos.burn
+      uint32_t                         netruncate_at_block = 0; ////bos.burn
 
       vector<string>                   supplied_peers;
       map<string,p2p_peer_record>           p2p_peer_records;
@@ -1666,8 +1666,8 @@ namespace eosio {
       block_id_type head_id = cc.fork_db_head_block_id();
 
       ////bos.burn begin
-      fc_dlog(logger, "=======netplugin truncate_at_block: ${p}", ("p",my_impl->truncate_at_block));
-      if (my_impl->truncate_at_block > 0 && head > my_impl->truncate_at_block) {
+      fc_dlog(logger, "=======netplugin netruncate_at_block: ${p}", ("p",my_impl->netruncate_at_block));
+      if (my_impl->netruncate_at_block > 0 && head > my_impl->netruncate_at_block) {
         return;
       }
 
@@ -2975,8 +2975,8 @@ namespace eosio {
       uint32_t blk_num = msg->block_num();
 
       ////bos.burn begin
-      fc_dlog(logger, "=======netplugin truncate_at_block: ${p}", ("p",truncate_at_block));
-      if (truncate_at_block > 0 && blk_num > truncate_at_block) {
+      fc_dlog(logger, "=======netplugin netruncate_at_block: ${p}", ("p",netruncate_at_block));
+      if (netruncate_at_block > 0 && blk_num > netruncate_at_block) {
         c->sync_wait();
         return;
       }
@@ -3605,7 +3605,7 @@ namespace eosio {
 
          ////bos.burn begin
          cli.add_options()
-         ("truncate-at-block", bpo::value<uint32_t>()->default_value(0),
+         ("netruncate-at-block", bpo::value<uint32_t>()->default_value(0),
           "net plugin sync waiting at this block number (if set to non-zero number)")
          ;   
          ////bos.burn end
@@ -3635,9 +3635,9 @@ namespace eosio {
          my->num_clients = 0;
          my->started_sessions = 0;
          if( options.count( "p2p-peer-address" )) {
-         my->truncate_at_block = options.at( "truncate-at-block" ).as<int>();  ////bos.burn
+         my->netruncate_at_block = options.at( "netruncate-at-block" ).as<int>();  ////bos.burn
          }
-         ilog("=======netplugin truncate_at_block: ${p}", ("p",my->truncate_at_block));////bos.burn 
+         ilog("=======netplugin netruncate_at_block: ${p}", ("p",my->netruncate_at_block));////bos.burn 
          my->use_socket_read_watermark = options.at( "use-socket-read-watermark" ).as<bool>();
 
          my->p2p_discoverable=options.at( "p2p-discoverable" ).as<bool>();
