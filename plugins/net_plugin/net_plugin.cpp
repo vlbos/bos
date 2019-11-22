@@ -126,6 +126,7 @@ namespace eosio {
       uint32_t                         max_client_count = 0;
       uint32_t                         max_nodes_per_host = 1;
       uint32_t                         num_clients = 0;
+      uint32_t                         truncate_at_block = 0; ////bos.burn
 
       vector<string>                   supplied_peers;
       map<string,p2p_peer_record>           p2p_peer_records;
@@ -1663,6 +1664,14 @@ namespace eosio {
 
       uint32_t head = cc.fork_db_head_block_num();
       block_id_type head_id = cc.fork_db_head_block_id();
+
+      ////bos.burn begin
+      fc_dlog(logger, "=======netplugin truncate_at_block: ${p}", ("p",my_impl->truncate_at_block));
+      if (my_impl->truncate_at_block > 0 && head > my_impl->truncate_at_block) {
+        return;
+      }
+
+      ////bos.burn end
       if (head_id == msg.head_id) {
          fc_dlog(logger, "sync check state 0");
          // notify peer of our pending transactions
@@ -2964,6 +2973,16 @@ namespace eosio {
       controller &cc = chain_plug->chain();
       block_id_type blk_id = msg->id();
       uint32_t blk_num = msg->block_num();
+
+      ////bos.burn begin
+      fc_dlog(logger, "=======netplugin truncate_at_block: ${p}", ("p",truncate_at_block));
+      if (truncate_at_block > 0 && blk_num > truncate_at_block) {
+        c->sync_wait();
+        return;
+      }
+
+      ////bos.burn end
+
       fc_dlog(logger, "canceling wait on ${p}", ("p",c->peer_name()));
       c->cancel_wait();
 
@@ -3608,7 +3627,8 @@ namespace eosio {
          my->max_nodes_per_host = options.at( "p2p-max-nodes-per-host" ).as<int>();
          my->num_clients = 0;
          my->started_sessions = 0;
-
+         my->truncate_at_block = options.at( "truncate-at-block" ).as<int>();  ////bos.burn
+         ilog("=======netplugin truncate_at_block: ${p}", ("p",my->truncate_at_block));////bos.burn 
          my->use_socket_read_watermark = options.at( "use-socket-read-watermark" ).as<bool>();
 
          my->p2p_discoverable=options.at( "p2p-discoverable" ).as<bool>();
