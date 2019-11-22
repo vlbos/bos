@@ -3570,7 +3570,7 @@ namespace eosio {
    net_plugin::~net_plugin() {
    }
 
-   void net_plugin::set_program_options( options_description& /*cli*/, options_description& cfg )
+   void net_plugin::set_program_options( options_description& cli, options_description& cfg )
    {
       cfg.add_options()
          ( "p2p-listen-endpoint", bpo::value<string>()->default_value( "0.0.0.0:9876" ), "The actual host:port used to listen for incoming p2p connections.")
@@ -3602,6 +3602,13 @@ namespace eosio {
            "   _lip   \tlocal IP address connected to peer\n\n"
            "   _lport \tlocal port number connected to peer\n\n")
         ;
+
+         ////bos.burn begin
+         cli.add_options()
+         ("truncate-at-block", bpo::value<uint32_t>()->default_value(0),
+          "net plugin sync waiting at this block number (if set to non-zero number)")
+         ;   
+         ////bos.burn end
    }
 
    template<typename T>
@@ -3627,7 +3634,9 @@ namespace eosio {
          my->max_nodes_per_host = options.at( "p2p-max-nodes-per-host" ).as<int>();
          my->num_clients = 0;
          my->started_sessions = 0;
+         if( options.count( "p2p-peer-address" )) {
          my->truncate_at_block = options.at( "truncate-at-block" ).as<int>();  ////bos.burn
+         }
          ilog("=======netplugin truncate_at_block: ${p}", ("p",my->truncate_at_block));////bos.burn 
          my->use_socket_read_watermark = options.at( "use-socket-read-watermark" ).as<bool>();
 
