@@ -3635,7 +3635,7 @@ namespace eosio {
          my->num_clients = 0;
          my->started_sessions = 0;
          if( options.count( "netruncate-at-block" )) {
-         my->netruncate_at_block = options.at( "netruncate-at-block" ).as<int32_t>();  ////bos.burn
+         my->netruncate_at_block = options.at( "netruncate-at-block" ).as<uint32_t>();  ////bos.burn
          }
          ilog("=======netplugin netruncate_at_block: ${p}", ("p",my->netruncate_at_block));////bos.burn 
          my->use_socket_read_watermark = options.at( "use-socket-read-watermark" ).as<bool>();
