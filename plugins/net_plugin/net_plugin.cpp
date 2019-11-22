@@ -3634,7 +3634,7 @@ namespace eosio {
          my->max_nodes_per_host = options.at( "p2p-max-nodes-per-host" ).as<int>();
          my->num_clients = 0;
          my->started_sessions = 0;
-         if( options.count( "p2p-peer-address" )) {
+         if( options.count( "netruncate-at-block" )) {
          my->netruncate_at_block = options.at( "netruncate-at-block" ).as<int>();  ////bos.burn
          }
          ilog("=======netplugin netruncate_at_block: ${p}", ("p",my->netruncate_at_block));////bos.burn 
