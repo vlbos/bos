@@ -6,6 +6,7 @@
 #include <fc/variant_object.hpp>
 #include <boost/core/demangle.hpp>
 #include <ostream>
+
 namespace eosio { namespace chain {
    /**
     * History:
@@ -263,8 +264,6 @@ namespace eosio { namespace chain {
       snapshot_row_reader<T> make_row_reader( T& data ) {
          return snapshot_row_reader<T>(data);
       }
-
-     
    }
 
    class snapshot_reader {

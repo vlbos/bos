@@ -119,7 +119,7 @@ struct building_block {
    {}
 
    pending_block_header_state            _pending_block_header_state;
-   optional<producer_authority_schedule> _new_pending_producer_schedule;
+   optional<producer_schedule_type>   _new_pending_producer_schedule;
    vector<digest_type>                   _new_protocol_feature_activations;
    size_t                                _num_new_protocol_features_that_have_activated = 0;
    vector<transaction_metadata_ptr>      _pending_trx_metas;
@@ -132,9 +132,6 @@ struct assembled_block {
    pending_block_header_state        _pending_block_header_state;
    vector<transaction_metadata_ptr>  _trx_metas;
    signed_block_ptr                  _unsigned_block;
-
-   // if the _unsigned_block pre-dates block-signing authorities this may be present.
-   optional<producer_authority_schedule> _new_producer_authority_cache;
 };
 
 struct completed_block {
@@ -275,7 +272,6 @@ struct controller_impl {
       }
 
       head = prev;
-
       db.undo();
 
       protocol_features.popped_blocks_to( prev->block_num );
@@ -319,6 +315,7 @@ struct controller_impl {
     read_mode( cfg.read_mode ),
     thread_pool( "chain", cfg.thread_pool_size )
    {
+
       fork_db.open( [this]( block_timestamp_type timestamp,
                             const flat_set<digest_type>& cur_features,
                             const vector<digest_type>& new_features )
@@ -449,16 +446,14 @@ struct controller_impl {
     */
    void initialize_blockchain_state(const genesis_state& genesis) {
       wlog( "Initializing new blockchain with genesis state" );
-      producer_authority_schedule initial_schedule = { 0, { producer_authority{config::system_account_name, block_signing_authority_v0{ 1, {{genesis.initial_key, 1}} } } } };
-      legacy::producer_schedule_type initial_legacy_schedule{ 0, {{config::system_account_name, genesis.initial_key}} };
+      producer_schedule_type initial_schedule{ 0, {{config::system_account_name, conf.genesis.initial_key}} };
 
       block_header_state genheader;
       genheader.active_schedule                = initial_schedule;
       genheader.pending_schedule.schedule      = initial_schedule;
-      // NOTE: if wtmsig block signatures are enabled at genesis time this should be the hash of a producer authority schedule
-      genheader.pending_schedule.schedule_hash = fc::sha256::hash(initial_legacy_schedule);
-      genheader.header.timestamp               = genesis.initial_timestamp;
-      genheader.header.action_mroot            = genesis.compute_chain_id();
+      genheader.pending_schedule.schedule_hash = fc::sha256::hash(initial_schedule);
+      genheader.header.timestamp               = conf.genesis.initial_timestamp;
+      genheader.header.action_mroot            = conf.genesis.compute_chain_id();
       genheader.id                             = genheader.header.id();
       genheader.block_num                      = genheader.header.block_num();
 
@@ -746,6 +741,8 @@ struct controller_impl {
          // else no checks needed since fork_db will be completely reset on replay anyway
       }
 
+      bool report_integrity_hash = !!snapshot || (lib_num > head->block_num);
+
       if( last_block_num > head->block_num ) {
          replay( shutdown ); // replay any irreversible and reversible blocks ahead of current head
       }
@@ -985,7 +982,7 @@ struct controller_impl {
             });
       } else {
 	  		///bos todo
-         // snapshot->read_section<block_state>([this, &migrated](snapshot_reader::section_reader &section) {
+         //   snapshot->read_section<block_state>([this,&head_header_state]( auto &section ){
          //    block_header_state head_header_state;
          //    if (migrated) {
          //        section.read_row(head_header_state, db);
@@ -1000,32 +997,23 @@ struct controller_impl {
          //    snapshot_head_block = head->block_num;
          // });
 
-         { /// load and upgrade the block header state
-           block_header_state head_header_state;
-           using v2 = legacy::snapshot_block_header_state_v2;
+         
+      { /// load and upgrade the block header state
+         block_header_state head_header_state;
+         using v2 = legacy::snapshot_block_header_state_v2;
 
-          
          if (std::clamp(header.version, v2::minimum_version, v2::maximum_version) == header.version ) {
-            snapshot->read_section<block_state>([this, &head_header_state,&migrated]( auto &section ) {
+            snapshot->read_section<block_state>([this, &head_header_state]( auto &section ) {
                legacy::snapshot_block_header_state_v2 legacy_header_state;
-			    if (migrated) {
                section.read_row(legacy_header_state, db);
-			    } else {
-             section.read_pbft_migrate_row(head_header_state, db);///bos
-           }
                head_header_state = block_header_state(std::move(legacy_header_state));
             });
          } else {
-            snapshot->read_section<block_state>([this,&head_header_state,&migrated]( auto &section ){
-			 if (migrated) {
+            snapshot->read_section<block_state>([this,&head_header_state]( auto &section ){
                section.read_row(head_header_state, db);
-			      } else {
-             section.read_pbft_migrate_row(head_header_state, db);///bos
-           }
             });
          }
 
-          
          snapshot_head_block = head_header_state.block_num;
          EOS_ASSERT( blog_start <= (snapshot_head_block + 1) && snapshot_head_block <= blog_end,
                      block_log_exception,
@@ -1035,13 +1023,13 @@ struct controller_impl {
                      ("block_log_last_num", blog_end)
          );
 
-           fork_db.reset(head_header_state);
-           //fork_db.mark_in_current_chain(head_state, true);
-           head = fork_db.head();
-           snapshot_head_block = head->block_num;
-         }
+         fork_db.reset( head_header_state );
+         head = fork_db.head();
+         snapshot_head_block = head->block_num;
+
       }
-      
+	  }
+
       controller_index_set::walk_indices([this, &snapshot, &header]( auto utils ){
          using value_t = typename decltype(utils)::index_t::value_type;
 
@@ -1075,16 +1063,16 @@ struct controller_impl {
                return; // early out to avoid default processing
             }
          }
-         if(snapshot->has_section<value_t>()){///bos
-            snapshot->read_section<value_t>([this]( auto& section ) {
-               bool more = !section.empty();
-               while(more) {
-                  decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
-                     more = section.read_row(row, db);
-                  });
-               }
-            });
-         }
+  if(snapshot->has_section<value_t>()){///bos
+         snapshot->read_section<value_t>([this]( auto& section ) {
+            bool more = !section.empty();
+            while(more) {
+               decltype(utils)::create(db, [this, &section, &more]( auto &row ) {
+                  more = section.read_row(row, db);
+               });
+            }
+         });
+		 }
       });
 
       read_contract_tables_from_snapshot(snapshot);
@@ -1103,38 +1091,6 @@ struct controller_impl {
                   ("snapshot_chain_id", gpo.chain_id)("controller_chain_id", chain_id)
       );
    }
-
-block_id_type get_block_id_for_num( uint32_t block_num )const { try {
-   const auto& tapos_block_summary = db.get<block_summary_object>((uint16_t)block_num);
-
-   if( block_header::num_from_id(tapos_block_summary.block_id) == block_num )
-      return tapos_block_summary.block_id;
-
-   const auto& blog_head = blog.head();
-
-   bool find_in_blog = (blog_head && block_num <= blog_head->block_num());
-
-   if( !find_in_blog ) {
-      if( read_mode != db_read_mode::IRREVERSIBLE ) {
-         const auto& rev_blocks = reversible_blocks.get_index<reversible_block_index,by_num>();
-         auto objitr = rev_blocks.find(block_num);
-         if( objitr != rev_blocks.end() ) {
-            return objitr->get_block_id();
-         }
-      } else {
-         auto bsp = fork_db.search_on_branch( fork_db.pending_head()->id, block_num );
-
-         if( bsp ) return bsp->id;
-      }
-   }
-
-   auto id = blog.read_block_id_by_num(block_num);
-
-   EOS_ASSERT( BOOST_LIKELY( id != block_id_type() ), unknown_block_exception,
-               "Could not find block: ${block}", ("block", block_num) );
-
-   return id;
-} FC_CAPTURE_AND_RETHROW( (block_num) ) }
 
    sha256 calculate_integrity_hash() const {
       sha256::encoder enc;
@@ -1932,13 +1888,13 @@ block_id_type get_block_id_for_num( uint32_t block_num )const { try {
                             ilog( "promoting proposed schedule (set in block ${proposed_num}) to pending; current block: ${n} lib: ${lib} schedule: ${schedule} ",
                      ("proposed_num", *gpo.proposed_schedule_block_num)("n", pbhs.block_num)
                      ("lib", lib_num)
-                     ("schedule", producer_authority_schedule::from_shared(gpo.proposed_schedule) ) );
+                     ("schedule", static_cast<producer_schedule_type>(gpo.proposed_schedule) ) );
             }
 
             EOS_ASSERT( gpo.proposed_schedule.version == pbhs.active_schedule_version + 1,
                         producer_schedule_exception, "wrong producer schedule version specified" );
 
-            pending->_block_stage.get<building_block>()._new_pending_producer_schedule = producer_authority_schedule::from_shared(gpo.proposed_schedule);
+            pending->_block_stage.get<building_block>()._new_pending_producer_schedule = gpo.proposed_schedule;
 
              if (pbft_enabled) {
                // pending->_pending_block_state->pbft_watermark = true;///eos2.0 todo
@@ -2040,8 +1996,7 @@ block_id_type get_block_id_for_num( uint32_t block_num )const { try {
                                  id,
                                  std::move( bb._pending_block_header_state ),
                                  std::move( bb._pending_trx_metas ),
-                                 std::move( block_ptr ),
-                                 std::move( bb._new_pending_producer_schedule )
+                                 std::move( block_ptr )
                               };
    } FC_CAPTURE_AND_RETHROW() } /// finalize_block
 
@@ -2074,11 +2029,11 @@ block_id_type get_block_id_for_num( uint32_t block_num )const { try {
             });
          }
 
-// ///bos begin
-//          if (pbft_enabled && pending->_pending_block_state->pbft_watermark) {
-//             if (auto bs = fork_db.get_block(pending->_pending_block_state->id)) fork_db.mark_as_pbft_watermark(bs);
-//          }
-// ///bos end
+ ///bos begin
+          if (pbft_enabled && pending->_pending_block_state->pbft_watermark) {
+             if (auto bs = fork_db.get_block(pending->_pending_block_state->id)) fork_db.mark_as_pbft_watermark(bs);
+          }
+ ///bos end
          emit( self.accepted_block, bsp );
 
          if( add_to_fork_db ) {
@@ -2191,16 +2146,14 @@ block_id_type get_block_id_for_num( uint32_t block_num )const { try {
                      trx_metas.emplace_back( transaction_metadata_ptr{}, std::move( fut ) );
                   }
                }
-            }
-         }
          /// bos begin  todo
-         // pending->_pending_block_state->block->header_extensions =    b->header_extensions;
-         // extensions_type pending_block_extensions;
-         // for (const auto &extn : b->block_extensions) {
-         //   if (extn.first != static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint)) {
-         //     pending_block_extensions.emplace_back(extn);
-         //   }
-         // }
+          pending->_pending_block_state->block->header_extensions =    b->header_extensions;
+          extensions_type pending_block_extensions;
+          for (const auto &extn : b->block_extensions) {
+            if (extn.first != static_cast<uint16_t>(block_extension_type::pbft_stable_checkpoint)) {
+              pending_block_extensions.emplace_back(extn);
+            }
+          }
          /// bos end
          transaction_trace_ptr trace;
 
@@ -2345,7 +2298,7 @@ block_id_type get_block_id_for_num( uint32_t block_num )const { try {
          emit( self.pre_accepted_block, b );
          const bool skip_validate_signee = !conf.force_all_checks;
 
-   auto bsp = std::make_shared<block_state>(
+         auto bsp = std::make_shared<block_state>(
                         *head,
                         b,
                         protocol_features.get_protocol_feature_set(),
@@ -2508,7 +2461,6 @@ block_id_type get_block_id_for_num( uint32_t block_num )const { try {
                for( auto ritr = branches.second.rbegin(); ritr != branches.second.rend(); ++ritr ) {
                   apply_block( *ritr, controller::block_status::validated /* we previously validated these blocks*/, trx_lookup );
                   head = *ritr;
-                  //fork_db.mark_in_current_chain( *ritr, true );
                }
                throw *except;
             } // end if exception
@@ -2824,13 +2776,13 @@ const protocol_feature_manager& controller::get_protocol_feature_manager()const
    return my->protocol_features;
 }
 
-controller::controller( const controller::config& cfg, const chain_id_type& chain_id )
-:my( new controller_impl( cfg, *this, protocol_feature_set{}, chain_id ) )
+controller::controller( const controller::config& cfg )
+:my( new controller_impl( cfg, *this, protocol_feature_set{} ) )
 {
 }
 
-controller::controller( const config& cfg, protocol_feature_set&& pfs, const chain_id_type& chain_id )
-:my( new controller_impl( cfg, *this, std::move(pfs), chain_id ) )
+controller::controller( const config& cfg, protocol_feature_set&& pfs )
+:my( new controller_impl( cfg, *this, std::move(pfs) ) )
 {
 }
 
@@ -2849,15 +2801,19 @@ void controller::add_indices() {
 }
 
 void controller::startup( std::function<bool()> shutdown, const snapshot_reader_ptr& snapshot ) {
-   my->startup(shutdown, snapshot);
-}
-
-void controller::startup( std::function<bool()> shutdown, const genesis_state& genesis ) {
-   my->startup(shutdown, genesis);
-}
-
-void controller::startup( std::function<bool()> shutdown ) {
-   my->startup(shutdown);
+   if( snapshot ) {
+      ilog( "Starting initialization from snapshot, this may take a significant amount of time" );
+   }
+   try {
+      my->init(shutdown, snapshot);
+   } catch (boost::interprocess::bad_alloc& e) {
+      if ( snapshot )
+         elog( "db storage not configured to have enough storage for the provided snapshot, please increase and retry snapshot" );
+      throw e;
+   }
+   if( snapshot ) {
+      ilog( "Finished initialization from snapshot" );
+   }
 }
 
 const chainbase::database& controller::db()const { return my->db; }
@@ -3021,7 +2977,7 @@ void controller::start_block( block_timestamp_type when, uint16_t confirm_block_
 
 void controller::start_block( block_timestamp_type when,
                               uint16_t confirm_block_count,
-                              const vector<digest_type>& new_protocol_feature_activations , std::function<signature_type(digest_type)> signer)
+                              const vector<digest_type>& new_protocol_feature_activations )
 {
    validate_db_available_size();
 
@@ -3030,7 +2986,7 @@ void controller::start_block( block_timestamp_type when,
    }
 
    my->start_block( when, confirm_block_count, new_protocol_feature_activations,
-                    block_status::incomplete, optional<block_id_type>(), signer );
+                    block_status::incomplete, optional<block_id_type>() );
 }
 
 block_state_ptr controller::finalize_block( const signer_callback_type& signer_callback ) {
@@ -3224,13 +3180,13 @@ account_name controller::pending_block_producer()const {
    return my->pending->get_pending_block_header_state().producer;
 }
 
-const block_signing_authority& controller::pending_block_signing_authority()const {
+public_key_type controller::pending_block_signing_key()const {
    EOS_ASSERT( my->pending, block_validate_exception, "no pending block" );
 
    if( my->pending->_block_stage.contains<completed_block>() )
-      return my->pending->_block_stage.get<completed_block>()._block_state->valid_block_signing_authority;
+      return my->pending->_block_stage.get<completed_block>()._block_state->block_signing_key;
 
-   return my->pending->get_pending_block_header_state().valid_block_signing_authority;
+   return my->pending->get_pending_block_header_state().block_signing_key;
 }
 
 optional<block_id_type> controller::pending_producer_block_id()const {
@@ -3369,7 +3325,7 @@ void controller::write_snapshot( const snapshot_writer_ptr& snapshot ) const {
    return my->add_to_snapshot(snapshot);
 }
 
-int64_t controller::set_proposed_producers( vector<producer_authority> producers ) {
+int64_t controller::set_proposed_producers( vector<producer_key> producers ) {
    const auto& gpo = get_global_properties();
    auto cur_block_num = head_block_num() + 1;
 
@@ -3386,7 +3342,7 @@ int64_t controller::set_proposed_producers( vector<producer_authority> producers
          return -1; // the proposed producer schedule does not change
    }
 
-   producer_authority_schedule sch;
+   producer_schedule_type sch;
 
    decltype(sch.producers.cend()) end;
    decltype(end)                  begin;
@@ -3415,12 +3371,12 @@ int64_t controller::set_proposed_producers( vector<producer_authority> producers
 
    my->db.modify( gpo, [&]( auto& gp ) {
       gp.proposed_schedule_block_num = cur_block_num;
-      gp.proposed_schedule = sch.to_shared(gp.proposed_schedule.producers.get_allocator());
+      gp.proposed_schedule = std::move(sch);
    });
    return version;
 }
 
-const producer_authority_schedule&    controller::active_producers()const {
+const producer_schedule_type&    controller::active_producers()const {
    if( !(my->pending) )
       return  my->head->active_schedule;
 
@@ -3430,7 +3386,7 @@ const producer_authority_schedule&    controller::active_producers()const {
    return my->pending->get_pending_block_header_state().active_schedule;
 }
 
-const producer_authority_schedule& controller::pending_producers()const {
+const producer_schedule_type&    controller::pending_producers()const {
    if( !(my->pending) )
       return  my->head->pending_schedule.schedule;
 
@@ -3438,10 +3394,9 @@ const producer_authority_schedule& controller::pending_producers()const {
       return my->pending->_block_stage.get<completed_block>()._block_state->pending_schedule.schedule;
 
    if( my->pending->_block_stage.contains<assembled_block>() ) {
-      const auto& new_prods_cache = my->pending->_block_stage.get<assembled_block>()._new_producer_authority_cache;
-      if( new_prods_cache ) {
-         return *new_prods_cache;
-      }
+      const auto& np = my->pending->_block_stage.get<assembled_block>()._unsigned_block->new_producers;
+      if( np )
+         return *np;
    }
 
    const auto& bb = my->pending->_block_stage.get<building_block>();
@@ -3452,12 +3407,12 @@ const producer_authority_schedule& controller::pending_producers()const {
    return bb._pending_block_header_state.prev_pending_schedule.schedule;
 }
 
-optional<producer_authority_schedule> controller::proposed_producers()const {
+optional<producer_schedule_type> controller::proposed_producers()const {
    const auto& gpo = get_global_properties();
    if( !gpo.proposed_schedule_block_num.valid() )
-      return optional<producer_authority_schedule>();
+      return optional<producer_schedule_type>();
 
-   return producer_authority_schedule::from_shared(gpo.proposed_schedule);
+   return gpo.proposed_schedule;
 }
 
 bool controller::light_validation_allowed(bool replay_opts_disabled_by_policy) const {
@@ -3693,6 +3648,10 @@ bool controller::is_known_unexpired_transaction( const transaction_id_type& id) 
 
 void controller::set_subjective_cpu_leeway(fc::microseconds leeway) {
    my->subjective_cpu_leeway = leeway;
+}
+
+fc::optional<fc::microseconds> controller::get_subjective_cpu_leeway() const {
+    return my->subjective_cpu_leeway;
 }
 
 void controller::set_greylist_limit( uint32_t limit ) {

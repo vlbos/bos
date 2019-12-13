@@ -14,8 +14,10 @@ namespace eosio { namespace chain {
          return digest && protocol_features.find(*digest) != protocol_features.end();
       }
    }
-
-   producer_authority block_header_state::get_scheduled_producer( block_timestamp_type t )const {
+ bool block_header_state::is_active_producer( account_name n )const {
+      return producer_to_last_produced.find(n) != producer_to_last_produced.end();
+   }
+   producer_key block_header_state::get_scheduled_producer( block_timestamp_type t )const {
       auto index = t.slot % (active_schedule.producers.size() * config::producer_repetitions);
       index /= config::producer_repetitions;
       return active_schedule.producers[index];
@@ -46,13 +48,13 @@ namespace eosio { namespace chain {
         (when = header.timestamp).slot++;
       }
 
-      auto proauth = get_scheduled_producer(when);
+      auto prokey = get_scheduled_producer(when);
 
-      auto itr = producer_to_last_produced.find( proauth.producer_name );
+      auto itr = producer_to_last_produced.find( prokey.producer_name );
       if( itr != producer_to_last_produced.end() ) {
         EOS_ASSERT( itr->second < (block_num+1) - num_prev_blocks_to_confirm, producer_double_confirm,
                     "producer ${prod} double-confirming known range",
-                    ("prod", proauth.producer_name)("num", block_num+1)
+                    ("prod", prokey.producer_name)("num", block_num+1)
                     ("confirmed", num_prev_blocks_to_confirm)("last_produced", itr->second) );
       }
 
@@ -67,8 +69,8 @@ namespace eosio { namespace chain {
       result.active_schedule_version                         = active_schedule.version;
       result.prev_activated_protocol_features                = activated_protocol_features;
 
-      result.valid_block_signing_authority                   = proauth.authority;
-      result.producer                                        = proauth.producer_name;
+      result.block_signing_key                               = prokey.block_signing_key;
+      result.producer                                        = prokey.producer_name;
 
       result.blockroot_merkle = blockroot_merkle;
       result.blockroot_merkle.append( id );
@@ -80,7 +82,6 @@ namespace eosio { namespace chain {
       auto num_active_producers = active_schedule.producers.size();
       uint32_t required_confs = (uint32_t)(num_active_producers * 2 / 3) + 1;
 
-      auto new_dpos_proposed_irreversible_blocknum = dpos_proposed_irreversible_blocknum;
 
       /// bos
       if (!pbft_enabled) {
@@ -91,11 +92,11 @@ namespace eosio { namespace chain {
           result.confirm_count.back() = (uint8_t)required_confs;
         } else {
           result.confirm_count.resize(confirm_count.size());
-          memcpy(&result.confirm_count[0], &confirm_count[1],
-                 confirm_count.size() - 1);
+         memcpy( &result.confirm_count[0], &confirm_count[1], confirm_count.size() - 1 );
           result.confirm_count.back() = (uint8_t)required_confs;
         }
       
+      auto new_dpos_proposed_irreversible_blocknum = dpos_proposed_irreversible_blocknum;
       int32_t i = (int32_t)(result.confirm_count.size() - 1);
       uint32_t blocks_to_confirm = num_prev_blocks_to_confirm + 1; /// confirm the head block too
       while( i >= 0 && blocks_to_confirm ) {
@@ -119,11 +120,11 @@ namespace eosio { namespace chain {
         --i;
         --blocks_to_confirm;
       }
-      }
 
+	/// bos
     result.pbft_stable_checkpoint_blocknum       = pbft_stable_checkpoint_blocknum;
 
-    /// bos
+    
     if (pbft_enabled) {
       result.dpos_irreversible_blocknum = dpos_irreversible_blocknum;
     } else {
@@ -132,7 +133,7 @@ namespace eosio { namespace chain {
       //      result.dpos_irreversible_blocknum =
       //      result.calc_dpos_last_irreversible();
       result.dpos_proposed_irreversible_blocknum =          new_dpos_proposed_irreversible_blocknum;
-      result.dpos_irreversible_blocknum =          calc_dpos_last_irreversible(proauth.producer_name);
+      result.dpos_irreversible_blocknum            = calc_dpos_last_irreversible( prokey.producer_name );
     }
 
       result.prev_pending_schedule                 = pending_schedule;
@@ -141,7 +142,8 @@ namespace eosio { namespace chain {
       //     result.dpos_irreversible_blocknum >= pending_schedule.schedule_lib_num )
       bool should_promote_pending = pending_schedule.schedule.producers.size();
       if ( !pbft_enabled ) {
-          should_promote_pending = should_promote_pending && result.dpos_irreversible_blocknum >=  pending_schedule.schedule_lib_num;
+          should_promote_pending = pending_schedule.schedule.producers.size() &&
+          result.dpos_irreversible_blocknum >= pending_schedule.schedule_lib_num ;
       }
 
       if (should_promote_pending)
@@ -151,7 +153,7 @@ namespace eosio { namespace chain {
          flat_map<account_name,uint32_t> new_producer_to_last_produced;
 
          for( const auto& pro : result.active_schedule.producers ) {
-            if( pro.producer_name == proauth.producer_name ) {
+            if( pro.producer_name == prokey.producer_name ) {
                new_producer_to_last_produced[pro.producer_name] = result.block_num;
             } else {
                auto existing = producer_to_last_produced.find( pro.producer_name );
@@ -167,14 +169,14 @@ namespace eosio { namespace chain {
                }
             }
          }
-         new_producer_to_last_produced[proauth.producer_name] = result.block_num;
+         new_producer_to_last_produced[prokey.producer_name] = result.block_num;
 
          result.producer_to_last_produced = std::move( new_producer_to_last_produced );
 
          flat_map<account_name,uint32_t> new_producer_to_last_implied_irb;
 
          for( const auto& pro : result.active_schedule.producers ) {
-            if( pro.producer_name == proauth.producer_name ) {
+            if( pro.producer_name == prokey.producer_name ) {
                new_producer_to_last_implied_irb[pro.producer_name] = dpos_proposed_irreversible_blocknum;
             } else {
                auto existing = producer_to_last_implied_irb.find( pro.producer_name );
@@ -197,9 +199,9 @@ namespace eosio { namespace chain {
       } else {
          result.active_schedule                  = active_schedule;
          result.producer_to_last_produced        = producer_to_last_produced;
-         result.producer_to_last_produced[proauth.producer_name] = result.block_num;
+         result.producer_to_last_produced[prokey.producer_name] = result.block_num;
          result.producer_to_last_implied_irb     = producer_to_last_implied_irb;
-         result.producer_to_last_implied_irb[proauth.producer_name] = dpos_proposed_irreversible_blocknum;
+         result.producer_to_last_implied_irb[prokey.producer_name] = dpos_proposed_irreversible_blocknum;
       }
 
       return result;
@@ -208,7 +210,7 @@ namespace eosio { namespace chain {
    signed_block_header pending_block_header_state::make_block_header(
                                                       const checksum256_type& transaction_mroot,
                                                       const checksum256_type& action_mroot,
-                                                      const optional<producer_authority_schedule>& new_producers,
+                                                      const optional<producer_schedule_type>& new_producers,
                                                       vector<digest_type>&& new_protocol_feature_activations,
                                                       const protocol_feature_set& pfs
    )const
@@ -222,6 +224,7 @@ namespace eosio { namespace chain {
       h.transaction_mroot = transaction_mroot;
       h.action_mroot      = action_mroot;
       h.schedule_version  = active_schedule_version;
+	  h.new_producers     = std::move(new_producers);
 ///bos
 //   result.header.header_extensions  = h.header_extensions;
 
@@ -233,26 +236,7 @@ namespace eosio { namespace chain {
          );
       }
 
-      if (new_producers) {
-         if ( detail::is_builtin_activated(prev_activated_protocol_features, pfs, builtin_protocol_feature_t::wtmsig_block_signatures) ) {
-            // add the header extension to update the block schedule
-            emplace_extension(
-                  h.header_extensions,
-                  producer_schedule_change_extension::extension_id(),
-                  fc::raw::pack( producer_schedule_change_extension( *new_producers ) )
-            );
-         } else {
-            legacy::producer_schedule_type downgraded_producers;
-            downgraded_producers.version = new_producers->version;
-            for (const auto &p : new_producers->producers) {
-               p.authority.visit([&downgraded_producers, &p](const auto& auth){
-                  EOS_ASSERT(auth.keys.size() == 1 && auth.keys.front().weight == auth.threshold, producer_schedule_exception, "multisig block signing present before enabled!");
-                  downgraded_producers.producers.emplace_back(legacy::producer_key{p.producer_name, auth.keys.front().key});
-               });
-            }
-            h.new_producers = std::move(downgraded_producers);
-         }
-      }
+     
 
       return h;
    }
@@ -273,44 +257,16 @@ namespace eosio { namespace chain {
       EOS_ASSERT( h.schedule_version == active_schedule_version, producer_schedule_exception, "schedule_version in signed block is corrupted" );
 
       auto exts = h.validate_and_extract_header_extensions();
-
-      std::optional<producer_authority_schedule> maybe_new_producer_schedule;
-      std::optional<digest_type> maybe_new_producer_schedule_hash;
-      bool wtmsig_enabled = false;
-
-      if (h.new_producers || exts.count(producer_schedule_change_extension::extension_id()) > 0 ) {
-         wtmsig_enabled = detail::is_builtin_activated(prev_activated_protocol_features, pfs, builtin_protocol_feature_t::wtmsig_block_signatures);
-      }
-
       if( h.new_producers ) {
-         EOS_ASSERT(!wtmsig_enabled, producer_schedule_exception, "Block header contains legacy producer schedule outdated by activation of WTMsig Block Signatures" );
-
          EOS_ASSERT( !was_pending_promoted, producer_schedule_exception, "cannot set pending producer schedule in the same block in which pending was promoted to active" );
-
-         const auto& new_producers = *h.new_producers;
-         EOS_ASSERT( new_producers.version == active_schedule.version + 1, producer_schedule_exception, "wrong producer schedule version specified" );
-         EOS_ASSERT( prev_pending_schedule.schedule.producers.empty(), producer_schedule_exception,
+         EOS_ASSERT( h.new_producers->version == active_schedule.version + 1, producer_schedule_exception, "wrong producer schedule version specified" );
+         EOS_ASSERT( prev_pending_schedule.schedule.producers.size() == 0, producer_schedule_exception,
                     "cannot set new pending producers until last pending is confirmed" );
-
-         maybe_new_producer_schedule_hash.emplace(digest_type::hash(new_producers));
-         maybe_new_producer_schedule.emplace(new_producers);
-      }
-
-      if ( exts.count(producer_schedule_change_extension::extension_id()) > 0 ) {
-         EOS_ASSERT(wtmsig_enabled, producer_schedule_exception, "Block header producer_schedule_change_extension before activation of WTMsig Block Signatures" );
-         EOS_ASSERT( !was_pending_promoted, producer_schedule_exception, "cannot set pending producer schedule in the same block in which pending was promoted to active" );
-
-         const auto& new_producer_schedule = exts.lower_bound(producer_schedule_change_extension::extension_id())->second.get<producer_schedule_change_extension>();
-
-         EOS_ASSERT( new_producer_schedule.version == active_schedule.version + 1, producer_schedule_exception, "wrong producer schedule version specified" );
-         EOS_ASSERT( prev_pending_schedule.schedule.producers.empty(), producer_schedule_exception,
-                     "cannot set new pending producers until last pending is confirmed" );
-
-         maybe_new_producer_schedule_hash.emplace(digest_type::hash(new_producer_schedule));
-         maybe_new_producer_schedule.emplace(new_producer_schedule);
       }
 
       protocol_feature_activation_set_ptr new_activated_protocol_features;
+
+      auto exts = h.validate_and_extract_header_extensions();
       { // handle protocol_feature_activation
          if( exts.count(protocol_feature_activation::extension_id() > 0) ) {
             const auto& new_protocol_features = exts.lower_bound(protocol_feature_activation::extension_id())->second.get<protocol_feature_activation>().protocol_features;
@@ -334,9 +290,9 @@ namespace eosio { namespace chain {
 
       result.header_exts = std::move(exts);
 
-      if( maybe_new_producer_schedule ) {
-         result.pending_schedule.schedule = std::move(*maybe_new_producer_schedule);
-         result.pending_schedule.schedule_hash = std::move(*maybe_new_producer_schedule_hash);
+      if( h.new_producers ) {
+         result.pending_schedule.schedule            = *h.new_producers;
+         result.pending_schedule.schedule_hash       = digest_type::hash( *h.new_producers );
          result.pending_schedule.schedule_lib_num    = block_number;
       } else {
          if( was_pending_promoted ) {
@@ -355,8 +311,6 @@ namespace eosio { namespace chain {
 
    block_header_state pending_block_header_state::finish_next(
                                  const signed_block_header& h,
-                                 vector<signature_type>&& additional_signatures,
-                                 const protocol_feature_set& pfs,
                                  const std::function<void( block_timestamp_type,
                                                            const flat_set<digest_type>&,
                                                            const vector<digest_type>& )>& validator,
@@ -423,7 +377,7 @@ namespace eosio { namespace chain {
                                                   const vector<digest_type>& )>& validator,
                         bool skip_validate_signee,bool pbft_enabled )const
    {
-      return next( h.timestamp, h.confirmed ,pbft_enabled).finish_next( h, std::move(_additional_signatures), pfs, validator, skip_validate_signee );
+      return next( h.timestamp, h.confirmed,pbft_enabled).finish_next( h, std::move(_additional_signatures), pfs, validator, skip_validate_signee );
    }
 
    digest_type   block_header_state::sig_digest()const {
@@ -485,17 +439,17 @@ namespace eosio { namespace chain {
       block_num                             = snapshot.block_num;
       dpos_proposed_irreversible_blocknum   = snapshot.dpos_proposed_irreversible_blocknum;
       dpos_irreversible_blocknum            = snapshot.dpos_irreversible_blocknum;
-      active_schedule                       = producer_authority_schedule( snapshot.active_schedule );
+      active_schedule                       = ( snapshot.active_schedule );
       blockroot_merkle                      = std::move(snapshot.blockroot_merkle);
       producer_to_last_produced             = std::move(snapshot.producer_to_last_produced);
       producer_to_last_implied_irb          = std::move(snapshot.producer_to_last_implied_irb);
-      valid_block_signing_authority         = block_signing_authority_v0{ 1, {{std::move(snapshot.block_signing_key), 1}} };
+      // valid_block_signing_authority         = block_signing_authority_v0{ 1, {{std::move(snapshot.block_signing_key), 1}} };
       confirm_count                         = std::move(snapshot.confirm_count);
       id                                    = std::move(snapshot.id);
       header                                = std::move(snapshot.header);
       pending_schedule.schedule_lib_num     = snapshot.pending_schedule.schedule_lib_num;
       pending_schedule.schedule_hash        = std::move(snapshot.pending_schedule.schedule_hash);
-      pending_schedule.schedule             = producer_authority_schedule( snapshot.pending_schedule.schedule );
+      pending_schedule.schedule             = ( snapshot.pending_schedule.schedule );
       activated_protocol_features           = std::move(snapshot.activated_protocol_features);
    }
 

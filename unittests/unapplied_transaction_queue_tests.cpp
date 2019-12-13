@@ -58,7 +58,8 @@ auto create_test_block_state( std::vector<transaction_metadata_ptr> trx_metas ) 
    };
    pending_block_header_state pbhs;
    pbhs.producer = block->producer;
-   producer_authority_schedule schedule = { 0, { producer_authority{block->producer, block_signing_authority_v0{ 1, {{pub_key, 1}} } } } };
+   // producer_authority_schedule schedule = { 0, { producer_authority{block->producer, block_signing_authority_v0{ 1, {{pub_key, 1}} } } } };
+   producer_schedule_type schedule = { 0, {block->producer} };
    pbhs.active_schedule = schedule;
    pbhs.valid_block_signing_authority = block_signing_authority_v0{ 1, {{pub_key, 1}} };
    auto bsp = std::make_shared<block_state>(

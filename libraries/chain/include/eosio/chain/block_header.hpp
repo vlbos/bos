@@ -22,8 +22,7 @@ namespace eosio { namespace chain {
    }
 
    using block_header_extension_types = detail::block_header_extension_types<
-      protocol_feature_activation,
-      producer_schedule_change_extension
+      protocol_feature_activation
    >;
 
    using block_header_extension = block_header_extension_types::block_header_extension_t;
@@ -58,11 +57,8 @@ namespace eosio { namespace chain {
        * indicate that the prior block which included new_producers->version has been marked
        * irreversible and that it the new producer schedule takes effect this block.
        */
-
-      using new_producers_type = optional<legacy::producer_schedule_type>;
-
       uint32_t                          schedule_version = 0;
-      new_producers_type                new_producers;
+      optional<producer_schedule_type>  new_producers;
       extensions_type                   header_extensions;
 
 

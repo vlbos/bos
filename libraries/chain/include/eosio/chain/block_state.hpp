@@ -13,7 +13,7 @@ namespace eosio { namespace chain {
      // block_state( const block_header_state& prev, signed_block_ptr b, bool skip_validate_signee, bool pbft_enabled );
       //block_state( const block_header_state& prev, block_timestamp_type when, bool pbft_enabled );
 	  
-	  block_state( const block_header_state& prev,
+      block_state( const block_header_state& prev,
                    signed_block_ptr b,
                    const protocol_feature_set& pfs,
                    const std::function<void( block_timestamp_type,
@@ -34,9 +34,11 @@ namespace eosio { namespace chain {
 
       block_state() = default;
 
+      bool is_valid()const { return validated; }
+
 
       signed_block_ptr                                    block;
-      bool                                                pbft_prepared = false;///bos
+	  bool                                                pbft_prepared = false;///bos
       bool                                                pbft_my_prepare = false;
       bool                                                pbft_watermark = false;
    private: // internal use only, not thread safe
@@ -66,9 +68,6 @@ namespace eosio { namespace chain {
       bool                                                validated = false;
 
       bool                                                _pub_keys_recovered = false;
-  
- 
-
       /// this data is redundant with the data stored in block, but facilitates
       /// recapturing transactions when we pop a block
       vector<transaction_metadata_ptr>                    _cached_trxs;

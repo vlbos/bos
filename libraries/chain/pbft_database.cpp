@@ -1195,7 +1195,7 @@ namespace eosio {
                     }
 
                     if ((*itr)->is_stable) {
-                        if (head_checkpoint_schedule == producer_authority_schedule(current_schedule) || head_checkpoint_schedule == producer_authority_schedule(new_schedule)) {
+                        if (head_checkpoint_schedule == (current_schedule) || head_checkpoint_schedule == (new_schedule)) {
                             pending_scb_info = block_info_type{(*itr)->block_id};
                             pending_scb_num = pending_scb_info.block_num();
                         } else {

@@ -28,8 +28,6 @@ namespace legacy {
       uint32_t                             block_num = 0;
       uint32_t                             dpos_proposed_irreversible_blocknum = 0;
       uint32_t                             dpos_irreversible_blocknum = 0;
-      uint32_t                             bft_irreversible_blocknum = 0;///bos
-      uint32_t                             pbft_stable_checkpoint_blocknum = 0;///bos
       producer_schedule_type               active_schedule;
       incremental_merkle                   blockroot_merkle;
       flat_map<account_name,uint32_t>      producer_to_last_produced;
@@ -54,20 +52,18 @@ namespace detail {
       uint32_t                          block_num = 0;
       uint32_t                          dpos_proposed_irreversible_blocknum = 0;
       uint32_t                          dpos_irreversible_blocknum = 0;
-      uint32_t                          bft_irreversible_blocknum = 0;///bos
-      uint32_t                          pbft_stable_checkpoint_blocknum = 0;///bos
-      producer_authority_schedule       active_schedule;
+      producer_schedule_type       active_schedule;
       incremental_merkle                blockroot_merkle;
       flat_map<account_name,uint32_t>   producer_to_last_produced;
       flat_map<account_name,uint32_t>   producer_to_last_implied_irb;
-      block_signing_authority           valid_block_signing_authority;
+      public_key_type                   block_signing_key;
       vector<uint8_t>                   confirm_count;
    };
 
    struct schedule_info {
       uint32_t                          schedule_lib_num = 0; /// last irr block num
       digest_type                       schedule_hash;
-      producer_authority_schedule       schedule;
+      producer_schedule_type            schedule;
    };
 
    bool is_builtin_activated( const protocol_feature_activation_set_ptr& pfa,
@@ -87,7 +83,7 @@ struct pending_block_header_state : public detail::block_header_state_common {
 
    signed_block_header make_block_header( const checksum256_type& transaction_mroot,
                                           const checksum256_type& action_mroot,
-                                          const optional<producer_authority_schedule>& new_producers,
+                                          const optional<producer_schedule_type>& new_producers,
                                           vector<digest_type>&& new_protocol_feature_activations,
                                           const protocol_feature_set& pfs)const;
 
@@ -129,10 +125,6 @@ struct block_header_state : public detail::block_header_state_common {
    /// duplication of work
    flat_multimap<uint16_t, block_header_extension> header_exts;
 
-	//    block_header_state   next( const signed_block_header& h, bool trust = false, bool pbft_enabled = false )const;
-   // block_header_state   generate_next( block_timestamp_type when, bool pbft_enabled = false )const;
-   // void set_confirmed( uint16_t num_prev_blocks, bool pbft_enabled = false );
-  //  bool maybe_promote_pending( bool pbft_enabled = false );
    block_header_state() = default;
 
    explicit block_header_state( detail::block_header_state_common&& base )
@@ -141,11 +133,9 @@ struct block_header_state : public detail::block_header_state_common {
 
    explicit block_header_state( legacy::snapshot_block_header_state_v2&& snapshot );
 
-   pending_block_header_state  next( block_timestamp_type when, uint16_t num_prev_blocks_to_confirm,bool pbft_enabled=false)const;
+   pending_block_header_state  next( block_timestamp_type when, uint16_t num_prev_blocks_to_confirm )const;
 
    block_header_state   next( const signed_block_header& h,
-                              vector<signature_type>&& additional_signatures,
-                              const protocol_feature_set& pfs,
                               const std::function<void( block_timestamp_type,
                                                         const flat_set<digest_type>&,
                                                         const vector<digest_type>& )>& validator,
@@ -153,10 +143,11 @@ struct block_header_state : public detail::block_header_state_common {
 
    bool                 has_pending_producers()const { return pending_schedule.schedule.producers.size(); }
    uint32_t             calc_dpos_last_irreversible( account_name producer_of_next_block )const;
+   bool                 is_active_producer( account_name n )const;
 
-   producer_authority     get_scheduled_producer( block_timestamp_type t )const;
-   const block_id_type&   prev()const { return header.previous; }
-   digest_type            sig_digest()const;
+   producer_key         get_scheduled_producer( block_timestamp_type t )const;
+   const block_id_type& prev()const { return header.previous; }
+   digest_type          sig_digest()const;
    void                   sign( const signer_callback_type& signer );
    void                   verify_signee()const;
 
@@ -171,13 +162,11 @@ FC_REFLECT( eosio::chain::detail::block_header_state_common,
             (block_num)
             (dpos_proposed_irreversible_blocknum)
             (dpos_irreversible_blocknum)
-            (bft_irreversible_blocknum)
-            (pbft_stable_checkpoint_blocknum)
             (active_schedule)
             (blockroot_merkle)
             (producer_to_last_produced)
             (producer_to_last_implied_irb)
-            (valid_block_signing_authority)
+            (block_signing_key)
             (confirm_count)
 )
 
@@ -193,7 +182,6 @@ FC_REFLECT_DERIVED(  eosio::chain::block_header_state, (eosio::chain::detail::bl
                      (pending_schedule)
                      (activated_protocol_features)
                      (additional_signatures)
-					
 )
 
 
@@ -208,8 +196,6 @@ FC_REFLECT( eosio::chain::legacy::snapshot_block_header_state_v2,
           ( block_num )
           ( dpos_proposed_irreversible_blocknum )
           ( dpos_irreversible_blocknum )
-          (bft_irreversible_blocknum)
-          (pbft_stable_checkpoint_blocknum)
           ( active_schedule )
           ( blockroot_merkle )
           ( producer_to_last_produced )

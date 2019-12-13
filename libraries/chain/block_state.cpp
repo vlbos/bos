@@ -82,7 +82,7 @@ namespace eosio { namespace chain {
                                                        const vector<digest_type>& )>& validator,
                              bool skip_validate_signee, bool pbft_enabled
                            )
-   :block_header_state( prev.next( *b, extract_additional_signatures(b, pfs, prev.activated_protocol_features), pfs, validator, skip_validate_signee,pbft_enabled ) )
+   :block_header_state( prev.next( *b, extract_additional_signatures(b, pfs, prev.activated_protocol_features), pfs, validator, skip_validate_signee,pbft_enabled  ) )
    ,block( std::move(b) )
    {}
 
@@ -95,7 +95,7 @@ namespace eosio { namespace chain {
                                                        const vector<digest_type>& )>& validator,
                              const signer_callback_type& signer, bool pbft_enabled
                            )
-   :block_header_state( inject_additional_signatures( std::move(cur), *b, pfs, validator, signer,pbft_enabled) )
+   :block_header_state( inject_additional_signatures( std::move(cur), *b, pfs, validator, signer,pbft_enabled ) )
    ,block( std::move(b) )
    ,_pub_keys_recovered( true ) // called by produce_block so signature recovery of trxs must have been done
    ,_cached_trxs( std::move(trx_metas) )

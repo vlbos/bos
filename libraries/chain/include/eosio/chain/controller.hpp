@@ -258,14 +258,14 @@ namespace eosio { namespace chain {
 
          time_point                     pending_block_time()const;
          account_name                   pending_block_producer()const;
-         const block_signing_authority& pending_block_signing_authority()const;
+         public_key_type         pending_block_signing_key()const;
          optional<block_id_type>        pending_producer_block_id()const;
 
          const vector<transaction_receipt>& get_pending_trx_receipts()const;
 
-         const producer_authority_schedule&    active_producers()const;
-         const producer_authority_schedule&    pending_producers()const;
-         optional<producer_authority_schedule> proposed_producers()const;
+         const producer_schedule_type&    active_producers()const;
+         const producer_schedule_type&    pending_producers()const;
+         optional<producer_schedule_type> proposed_producers()const;
 		 
 		 std::function<signature_type(digest_type)> pending_producer_signer()const;///bos
 
@@ -320,7 +320,7 @@ namespace eosio { namespace chain {
 
          bool is_known_unexpired_transaction( const transaction_id_type& id) const;
 
-         int64_t set_proposed_producers( vector<producer_authority> producers );
+         int64_t set_proposed_producers( vector<producer_key> producers );
 
          bool light_validation_allowed(bool replay_opts_disabled_by_policy) const;
          bool skip_auth_check()const;
