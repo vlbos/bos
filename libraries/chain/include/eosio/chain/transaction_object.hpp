@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 #include <fc/io/raw.hpp>
 
@@ -23,7 +27,7 @@ namespace eosio { namespace chain {
 
          id_type             id;
          time_point_sec      expiration;
-         transaction_id_type trx_id; //< trx_id should not be changed within a chainbase modifier lambda
+         transaction_id_type trx_id;
    };
 
    struct by_expiration;

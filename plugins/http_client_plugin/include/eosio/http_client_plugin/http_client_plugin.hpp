@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 #include <appbase/application.hpp>
 #include <fc/network/http/http_client.hpp>

@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #include <eosio/wallet_plugin/wallet.hpp>
 
 #include <algorithm>

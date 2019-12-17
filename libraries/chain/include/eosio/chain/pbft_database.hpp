@@ -537,7 +537,7 @@ namespace eosio {
             bool is_valid_committed_certificate(const pbft_committed_certificate& certificate, bool add_to_pbft_db = false, bool at_the_top = false);
             bool is_valid_longest_fork(const vector<producer_and_block_info>& producers, const block_info_type& cert_info, bool at_the_top = false);
 
-            legacy::producer_schedule_type lscb_active_producers() const;
+            producer_schedule_type lscb_active_producers() const;
             vector<block_num_type>& get_updated_watermarks();
             flat_map<public_key_type, uint32_t>& get_updated_fork_schedules();
             block_num_type get_current_pbft_watermark();

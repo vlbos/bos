@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 
 #include <eosio/producer_plugin/producer_plugin.hpp>

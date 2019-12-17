@@ -4,7 +4,6 @@ from testUtils import Utils
 from Cluster import Cluster
 from WalletMgr import WalletMgr
 from Node import Node
-from Node import ReturnType
 from TestHelper import TestHelper
 
 import decimal
@@ -12,9 +11,8 @@ import re
 
 ###############################################################
 # nodeos_run_test
-#
-# General test that tests a wide range of general use actions around nodeos and keosd
-#
+# --dump-error-details <Upon error print etc/eosio/node_*/config.ini and var/lib/node_*/stderr.log to stdout>
+# --keep-logs <Don't delete var/lib/node_* folders upon test completion>
 ###############################################################
 
 Print=Utils.Print
@@ -24,7 +22,7 @@ from core_symbol import CORE_SYMBOL
 
 args = TestHelper.parse_args({"--host","--port","--prod-count","--defproducera_prvt_key","--defproducerb_prvt_key","--mongodb"
                               ,"--dump-error-details","--dont-launch","--keep-logs","-v","--leave-running","--only-bios","--clean-run"
-                              ,"--sanity-test","--wallet-port"})
+                              ,"--sanity-test","--p2p-plugin","--wallet-port"})
 server=args.host
 port=args.port
 debug=args.v
@@ -39,6 +37,7 @@ prodCount=args.prod_count
 onlyBios=args.only_bios
 killAll=args.clean_run
 sanityTest=args.sanity_test
+p2pPlugin=args.p2p_plugin
 walletPort=args.wallet_port
 
 Utils.Debug=debug
@@ -68,7 +67,7 @@ try:
         cluster.killall(allInstances=killAll)
         cluster.cleanup()
         Print("Stand up cluster")
-        if cluster.launch(prodCount=prodCount, onlyBios=onlyBios, dontBootstrap=dontBootstrap) is False:
+        if cluster.launch(prodCount=prodCount, onlyBios=onlyBios, dontBootstrap=dontBootstrap, p2pPlugin=p2pPlugin) is False:
             cmdError("launcher")
             errorExit("Failed to stand up eos cluster.")
     else:
@@ -245,7 +244,7 @@ try:
         cmdError("FAILURE - transfer failed")
         errorExit("Transfer verification failed. Excepted %s, actual: %s" % (expectedAmount, actualAmount))
 
-    Print("Validating accounts after some user transactions")
+    Print("Validating accounts after some user trasactions")
     accounts=[testeraAccount, currencyAccount, exchangeAccount]
     cluster.validateAccounts(accounts)
 
@@ -321,7 +320,7 @@ try:
     if hashNum != 0:
         errorExit("FAILURE - get code currency1111 failed", raw=True)
 
-    contractDir="unittests/contracts/eosio.token"
+    contractDir="contracts/eosio.token"
     wasmFile="eosio.token.wasm"
     abiFile="eosio.token.abi"
     Print("Publish contract")
@@ -345,7 +344,7 @@ try:
         abiName=account["abi"]["structs"][0]["name"]
         abiActionName=account["abi"]["actions"][0]["name"]
         abiType=account["abi"]["actions"][0]["type"]
-        if abiName != "account" or abiActionName != "close" or abiType != "close":
+        if abiName != "transfer" or abiActionName != "transfer" or abiType != "transfer":
             errorExit("FAILURE - get EOS account failed", raw=True)
 
     Print("push create action to currency1111 contract")
@@ -645,12 +644,6 @@ try:
         cmdError("%s wallet unlock test" % (ClientName))
         errorExit("Failed to unlock wallet %s" % (testWallet.name))
 
-    if not enableMongo:
-        Print("Verify non-JSON call works")
-        rawAccount=node.getEosAccount(defproduceraAccount.name, exitOnError=True, returnType=ReturnType.raw)
-        coreLiquidBalance=account['core_liquid_balance']
-        match=re.search(r'\bliquid:\s*%s\s' % (coreLiquidBalance), rawAccount, re.MULTILINE | re.DOTALL)
-        assert match is not None, "did not find the core liquid balance (\"liquid:\") of %d in \"%s\"" % (coreLiquidBalance, rawAccount)
 
     Print("Get head block num.")
     currentBlockNum=node.getHeadBlockNum()
@@ -669,7 +662,6 @@ try:
                 errorExit("mongo get block by id %s" % blockId)
 
     Print("Request invalid block numbered %d. This will generate an expected error message." % (currentBlockNum+1000))
-    currentBlockNum=node.getHeadBlockNum() # If the tests take too long, we could be far beyond currentBlockNum+1000 and that'll cause a block to be found.
     block=node.getBlock(currentBlockNum+1000, silentErrors=True)
     if block is not None:
         errorExit("ERROR: Received block where not expected")

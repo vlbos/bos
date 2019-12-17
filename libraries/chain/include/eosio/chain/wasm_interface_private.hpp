@@ -12,7 +12,6 @@
 #include <eosio/chain/webassembly/runtime_interface.hpp>
 #include <eosio/chain/wasm_eosio_injection.hpp>
 #include <eosio/chain/transaction_context.hpp>
-#include <eosio/chain/code_object.hpp>
 #include <eosio/chain/exceptions.hpp>
 #include <fc/scoped_exit.hpp>
 
@@ -135,18 +134,18 @@ namespace eosio { namespace chain {
          wasm_instantiation_cache.get<by_last_block_num>().erase(first_it, last_it);
       }
 
-      const std::unique_ptr<wasm_instantiated_module_interface>& get_instantiated_module( const digest_type& code_hash, const uint8_t& vm_type,
+      const std::unique_ptr<wasm_instantiated_module_interface>& get_instantiated_module( const digest_type& code_hash, const shared_string& code,const uint8_t& vm_type,
                                                                                  const uint8_t& vm_version, transaction_context& trx_context )
       {
          wasm_cache_index::iterator it = wasm_instantiation_cache.find(
                                              boost::make_tuple(code_hash, vm_type, vm_version) );
-         const code_object* codeobject = nullptr;
+         
          if(it == wasm_instantiation_cache.end()) {
-            codeobject = &db.get<code_object,by_code_hash>(boost::make_tuple(code_hash, vm_type, vm_version));
+           
 
             it = wasm_instantiation_cache.emplace( wasm_interface_impl::wasm_cache_entry{
                                                       .code_hash = code_hash,
-                                                      .first_block_num_used = codeobject->first_block_used,
+                                                      .first_block_num_used = 1,///eos2.0 codeobject->first_block_used,
                                                       .last_block_num_used = UINT32_MAX,
                                                       .module = nullptr,
                                                       .vm_type = vm_type,
@@ -155,8 +154,7 @@ namespace eosio { namespace chain {
          }
 
          if(!it->module) {
-            if(!codeobject)
-               codeobject = &db.get<code_object,by_code_hash>(boost::make_tuple(code_hash, vm_type, vm_version));
+           
 
             auto timer_pause = fc::make_scoped_exit([&](){
                trx_context.resume_billing_timer();
@@ -164,8 +162,8 @@ namespace eosio { namespace chain {
             trx_context.pause_billing_timer();
             IR::Module module;
             std::vector<U8> bytes = {
-                (const U8*)codeobject->code.data(),
-                (const U8*)codeobject->code.data() + codeobject->code.size()};
+                (const U8*)code.data(),
+                (const U8*)code.data() + code.size()};
             try {
                Serialization::MemoryInputStream stream((const U8*)bytes.data(),
                                                        bytes.size());

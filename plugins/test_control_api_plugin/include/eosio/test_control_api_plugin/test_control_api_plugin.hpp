@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 #include <eosio/test_control_plugin/test_control_plugin.hpp>
 #include <eosio/http_plugin/http_plugin.hpp>

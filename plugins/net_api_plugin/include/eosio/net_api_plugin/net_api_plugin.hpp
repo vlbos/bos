@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 
 #include <eosio/net_plugin/net_plugin.hpp>

@@ -75,7 +75,7 @@ BOOST_AUTO_TEST_CASE(set_name_list_test)
       flat_set<account_name> nameset(list.begin(), list.end());
          // Create an account
          db.create<account_object>([](account_object &a) {
-            a.name = name("alice");
+            a.name = "alice";
          });
 
 
@@ -108,7 +108,7 @@ BOOST_AUTO_TEST_CASE(set_name_list_test)
       auto convert_names = [&](const shared_vector<name>& namevec, flat_set<account_name>& nameset) -> void {
         for(const auto& a :namevec)
         {
-           nameset.insert(a);
+           nameset.insert(uint64_t(a));
         }
       };
 

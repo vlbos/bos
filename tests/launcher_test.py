@@ -10,10 +10,9 @@ import decimal
 import re
 
 ###############################################################
-# launcher-test
-#
-# Specifically tests using the bios bootstrap script that is created by eosio-launcher
-#
+# nodeos_run_test
+# --dump-error-details <Upon error print etc/eosio/node_*/config.ini and var/lib/node_*/stderr.log to stdout>
+# --keep-logs <Don't delete var/lib/node_* folders upon test completion>
 ###############################################################
 
 Print=Utils.Print
@@ -22,7 +21,7 @@ cmdError=Utils.cmdError
 from core_symbol import CORE_SYMBOL
 
 args = TestHelper.parse_args({"--defproducera_prvt_key","--dump-error-details","--dont-launch","--keep-logs",
-                              "-v","--leave-running","--clean-run"})
+                              "-v","--leave-running","--clean-run","--p2p-plugin"})
 debug=args.v
 defproduceraPrvtKey=args.defproducera_prvt_key
 dumpErrorDetails=args.dump_error_details
@@ -30,6 +29,7 @@ keepLogs=args.keep_logs
 dontLaunch=args.dont_launch
 dontKill=args.leave_running
 killAll=args.clean_run
+p2pPlugin=args.p2p_plugin
 
 Utils.Debug=debug
 cluster=Cluster(walletd=True, defproduceraPrvtKey=defproduceraPrvtKey)
@@ -53,7 +53,7 @@ try:
         cluster.cleanup()
         Print("Stand up cluster")
         pnodes=4
-        if cluster.launch(pnodes=pnodes, totalNodes=pnodes) is False:
+        if cluster.launch(pnodes=pnodes, totalNodes=pnodes, p2pPlugin=p2pPlugin) is False:
             cmdError("launcher")
             errorExit("Failed to stand up eos cluster.")
     else:

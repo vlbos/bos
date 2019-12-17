@@ -11,7 +11,6 @@
 #include <eosio/chain/wasm_eosio_validation.hpp>
 #include <eosio/chain/wasm_eosio_injection.hpp>
 #include <eosio/chain/global_property_object.hpp>
-#include <eosio/chain/protocol_state_object.hpp>
 #include <eosio/chain/account_object.hpp>
 #include <fc/exception/exception.hpp>
 #include <fc/crypto/sha256.hpp>
@@ -51,9 +50,7 @@ namespace eosio { namespace chain {
       wasm_validations::wasm_binary_validation validator(control, module);
       validator.validate();
 
-      const auto& pso = control.db().get<protocol_state_object>();
-
-      root_resolver resolver( pso.whitelisted_intrinsics );
+      root_resolver resolver(true);
       LinkResult link_result = linkModule(module, resolver);
 
       //there are a couple opportunties for improvement here--
@@ -73,7 +70,7 @@ namespace eosio { namespace chain {
       my->current_lib(lib);
    }
 
-   void wasm_interface::apply( const digest_type& code_hash, const uint8_t& vm_type, const uint8_t& vm_version, apply_context& context ) {
+   void wasm_interface::apply( const digest_type& code_hash, const shared_string& code,const uint8_t& vm_type, const uint8_t& vm_version, apply_context& context ) {
 #ifdef EOSIO_EOS_VM_OC_RUNTIME_ENABLED
       if(my->eosvmoc) {
          const chain::eosvmoc::code_descriptor* cd = nullptr;
@@ -94,7 +91,7 @@ namespace eosio { namespace chain {
          }
       }
 #endif
-      my->get_instantiated_module(code_hash, vm_type, vm_version, context.trx_context)->apply(context);
+      my->get_instantiated_module(code_hash, code,vm_type, vm_version, context.trx_context)->apply(context);
    }
 
    void wasm_interface::exit() {
@@ -113,8 +110,9 @@ class context_aware_api {
       context_aware_api(apply_context& ctx, bool context_free = false )
       :context(ctx)
       {
-         if( context.is_context_free() )
+         if( context.context_free )
             EOS_ASSERT( context_free, unaccessible_api, "only context free api's can be used in this context" );
+         context.used_context_free_api |= !context_free;
       }
 
       void checktime() {
@@ -131,7 +129,7 @@ class context_free_api : public context_aware_api {
       context_free_api( apply_context& ctx )
       :context_aware_api(ctx, true) {
          /* the context_free_data is not available during normal application because it is prunable */
-         EOS_ASSERT( context.is_context_free(), unaccessible_api, "this API may only be called from context_free apply" );
+         EOS_ASSERT( context.context_free, unaccessible_api, "this API may only be called from context_free apply" );
       }
 
       int get_context_free_data( uint32_t index, array_ptr<char> buffer, uint32_t buffer_size )const {
@@ -144,7 +142,7 @@ class privileged_api : public context_aware_api {
       privileged_api( apply_context& ctx )
       :context_aware_api(ctx)
       {
-         EOS_ASSERT( context.is_privileged(), unaccessible_api, "${code} does not have permission to call this API", ("code",context.get_receiver()) );
+         EOS_ASSERT( context.privileged, unaccessible_api, "${code} does not have permission to call this API", ("code",context.receiver) );
       }
 
       /**
@@ -169,15 +167,6 @@ class privileged_api : public context_aware_api {
       }
 
       /**
-       *  Pre-activates the specified protocol feature.
-       *  Fails if the feature is unrecognized, disabled, or not allowed to be activated at the current time.
-       *  Also fails if the feature was already activated or pre-activated.
-       */
-      void preactivate_feature( const digest_type& feature_digest ) {
-         context.control.preactivate_feature( feature_digest );
-      }
-
-      /**
        * update the resource limits associated with an account.  Note these new values will not take effect until the
        * next resource "tick" which is currently defined as a cycle boundary inside a block.
        *
@@ -199,47 +188,16 @@ class privileged_api : public context_aware_api {
          context.control.get_resource_limits_manager().get_account_limits( account, ram_bytes, net_weight, cpu_weight, true); // *bos* add raw=true
       }
 
-      int64_t set_proposed_producers_common( vector<producer_authority> && producers, bool validate_keys ) {
+      int64_t set_proposed_producers( array_ptr<char> packed_producer_schedule, size_t datalen) {
+         datastream<const char*> ds( packed_producer_schedule, datalen );
+         vector<producer_key> producers;
+         fc::raw::unpack(ds, producers);
          EOS_ASSERT(producers.size() <= config::max_producers, wasm_execution_error, "Producer schedule exceeds the maximum producer count for this chain");
-         EOS_ASSERT( producers.size() > 0
-                     || !context.control.is_builtin_activated( builtin_protocol_feature_t::disallow_empty_producer_schedule ),
-                     wasm_execution_error,
-                     "Producer schedule cannot be empty"
-         );
-
-         const auto num_supported_key_types = context.db.get<protocol_state_object>().num_supported_key_types;
-
          // check that producers are unique
          std::set<account_name> unique_producers;
          for (const auto& p: producers) {
             EOS_ASSERT( context.is_account(p.producer_name), wasm_execution_error, "producer schedule includes a nonexisting account" );
-
-            p.authority.visit([&p, num_supported_key_types, validate_keys](const auto& a) {
-               uint32_t sum_weights = 0;
-               std::set<public_key_type> unique_keys;
-               for (const auto& kw: a.keys ) {
-                  EOS_ASSERT( kw.key.which() < num_supported_key_types, unactivated_key_type,
-                              "Unactivated key type used in proposed producer schedule");
-
-                  if( validate_keys ) {
-                     EOS_ASSERT( kw.key.valid(), wasm_execution_error, "producer schedule includes an invalid key" );
-                  }
-
-                  if (std::numeric_limits<uint32_t>::max() - sum_weights <= kw.weight) {
-                     sum_weights = std::numeric_limits<uint32_t>::max();
-                  } else {
-                     sum_weights += kw.weight;
-                  }
-
-                  unique_keys.insert(kw.key);
-               }
-
-               EOS_ASSERT( a.keys.size() == unique_keys.size(), wasm_execution_error, "producer schedule includes a duplicated key for ${account}", ("account", p.producer_name));
-               EOS_ASSERT( a.threshold > 0, wasm_execution_error, "producer schedule includes an authority with a threshold of 0 for ${account}", ("account", p.producer_name));
-               EOS_ASSERT( sum_weights >= a.threshold, wasm_execution_error, "producer schedule includes an unsatisfiable authority for ${account}", ("account", p.producer_name));
-            });
-
-
+            EOS_ASSERT( p.block_signing_key.valid(), wasm_execution_error, "producer schedule includes an invalid key" );
             unique_producers.insert(p.producer_name);
          }
          EOS_ASSERT( producers.size() == unique_producers.size(), wasm_execution_error, "duplicate producer name in producer schedule" );
@@ -247,38 +205,7 @@ class privileged_api : public context_aware_api {
          return context.control.set_proposed_producers( std::move(producers) );
       }
 
-      int64_t set_proposed_producers( array_ptr<char> packed_producer_schedule, uint32_t datalen ) {
-         datastream<const char*> ds( packed_producer_schedule, datalen );
-         vector<producer_authority> producers;
-
-         vector<legacy::producer_key> old_version;
-         fc::raw::unpack(ds, old_version);
-
-         /*
-          * Up-convert the producers
-          */
-         for ( const auto& p: old_version ) {
-            producers.emplace_back(producer_authority{ p.producer_name, block_signing_authority_v0{ 1, {{p.block_signing_key, 1}} } } );
-         }
-
-         return set_proposed_producers_common(std::move(producers), true);
-      }
-
-      int64_t set_proposed_producers_ex( uint64_t packed_producer_format, array_ptr<char> packed_producer_schedule, uint32_t datalen ) {
-         if (packed_producer_format == 0) {
-            return set_proposed_producers(packed_producer_schedule, datalen);
-         } else if (packed_producer_format == 1) {
-            datastream<const char*> ds( packed_producer_schedule, datalen );
-            vector<producer_authority> producers;
-
-            fc::raw::unpack(ds, producers);
-            return set_proposed_producers_common(std::move(producers), false);
-         } else {
-            EOS_THROW(wasm_execution_error, "Producer schedule is in an unknown format!");
-         }
-      }
-
-      uint32_t get_blockchain_parameters_packed( array_ptr<char> packed_blockchain_parameters, uint32_t buffer_size) {
+      uint32_t get_blockchain_parameters_packed( array_ptr<char> packed_blockchain_parameters, size_t buffer_size) {
          auto& gpo = context.control.get_global_properties();
 
          auto s = fc::raw::pack_size( gpo.configuration );
@@ -368,13 +295,13 @@ class privileged_api : public context_aware_api {
       // *bos  end*
 
       bool is_privileged( account_name n )const {
-         return context.db.get<account_metadata_object, by_name>( n ).is_privileged();
+         return context.db.get<account_object, by_name>( n ).privileged;
       }
 
       void set_privileged( account_name n, bool is_priv ) {
-         const auto& a = context.db.get<account_metadata_object, by_name>( n );
+         const auto& a = context.db.get<account_object, by_name>( n );
          context.db.modify( a, [&]( auto& ma ){
-            ma.set_privileged( is_priv );
+            ma.privileged = is_priv;
          });
       }
 
@@ -876,15 +803,6 @@ class crypto_api : public context_aware_api {
          fc::raw::unpack(ds, s);
          fc::raw::unpack(pubds, p);
 
-         EOS_ASSERT(s.which() < context.db.get<protocol_state_object>().num_supported_key_types, unactivated_signature_type,
-           "Unactivated signature type used during assert_recover_key");
-         EOS_ASSERT(p.which() < context.db.get<protocol_state_object>().num_supported_key_types, unactivated_key_type,
-           "Unactivated key type used when creating assert_recover_key");
-
-         if(context.control.is_producing_block())
-            EOS_ASSERT(s.variable_size() <= context.control.configured_subjective_signature_length_limit(),
-                       sig_variable_size_limit_exception, "signature variable length component size greater than subjective maximum");
-
          auto check = fc::crypto::public_key( s, digest, false );
          EOS_ASSERT( check == p, crypto_api_exception, "Error expected key different than recovered key" );
       }
@@ -894,35 +812,11 @@ class crypto_api : public context_aware_api {
                         array_ptr<char> pub, uint32_t publen ) {
          fc::crypto::signature s;
          datastream<const char*> ds( sig, siglen );
+         datastream<char*> pubds( pub, publen );
+
          fc::raw::unpack(ds, s);
-
-         EOS_ASSERT(s.which() < context.db.get<protocol_state_object>().num_supported_key_types, unactivated_signature_type,
-                    "Unactivated signature type used during recover_key");
-
-         if(context.control.is_producing_block())
-            EOS_ASSERT(s.variable_size() <= context.control.configured_subjective_signature_length_limit(),
-                       sig_variable_size_limit_exception, "signature variable length component size greater than subjective maximum");
-
-
-         auto recovered = fc::crypto::public_key(s, digest, false);
-
-         // the key types newer than the first 2 may be varible in length
-         if (s.which() >= config::genesis_num_supported_key_types ) {
-            EOS_ASSERT(publen >= 33, wasm_execution_error,
-                       "destination buffer must at least be able to hold an ECC public key");
-            auto packed_pubkey = fc::raw::pack(recovered);
-            auto copy_size = std::min<size_t>(publen, packed_pubkey.size());
-            memcpy(pub, packed_pubkey.data(), copy_size);
-            return packed_pubkey.size();
-         } else {
-            // legacy behavior, key types 0 and 1 always pack to 33 bytes.
-            // this will do one less copy for those keys while maintaining the rules of
-            //    [0..33) dest sizes: assert (asserts in fc::raw::pack)
-            //    [33..inf) dest sizes: return packed size (always 33)
-            datastream<char*> out_ds( pub, publen );
-            fc::raw::pack(out_ds, recovered);
-            return out_ds.tellp();
-         }
+         fc::raw::pack( pubds, fc::crypto::public_key( s, digest, false ) );
+         return pubds.tellp();
       }
 
       template<class Encoder> auto encode(char* data, uint32_t datalen) {
@@ -1108,16 +1002,6 @@ class system_api : public context_aware_api {
          return static_cast<uint64_t>( context.trx_context.published.time_since_epoch().count() );
       }
 
-      /**
-       * Returns true if the specified protocol feature is activated, false if not.
-       */
-      bool is_feature_activated( const digest_type& feature_digest ) {
-         return context.control.is_protocol_feature_activated( feature_digest );
-      }
-
-      name get_sender() {
-         return context.get_sender();
-      }
 };
 
 constexpr size_t max_assert_message = 1024;
@@ -1150,23 +1034,8 @@ public:
 
    void eosio_assert_code( bool condition, uint64_t error_code ) {
       if( BOOST_UNLIKELY( !condition ) ) {
-         if( error_code >= static_cast<uint64_t>(system_error_code::generic_system_error) ) {
-            restricted_error_code_exception e( FC_LOG_MESSAGE(
-                                                   error,
-                                                   "eosio_assert_code called with reserved error code: ${error_code}",
-                                                   ("error_code", error_code)
-            ) );
-            e.error_code = static_cast<uint64_t>(system_error_code::contract_restricted_error_code);
-            throw e;
-         } else {
-            eosio_assert_code_exception e( FC_LOG_MESSAGE(
-                                             error,
-                                             "assertion failure with error code: ${error_code}",
-                                             ("error_code", error_code)
-            ) );
-            e.error_code = error_code;
-            throw e;
-         }
+         EOS_THROW( eosio_assert_code_exception,
+                    "assertion failure with error code: ${error_code}", ("error_code", error_code) );
       }
    }
 
@@ -1181,22 +1050,22 @@ class action_api : public context_aware_api {
    action_api( apply_context& ctx )
       :context_aware_api(ctx,true){}
 
-      int read_action_data(array_ptr<char> memory, uint32_t buffer_size) {
-         auto s = context.get_action().data.size();
+      int read_action_data(array_ptr<char> memory, size_t buffer_size) {
+         auto s = context.act.data.size();
          if( buffer_size == 0 ) return s;
 
-         auto copy_size = std::min( static_cast<size_t>(buffer_size), s );
-         memcpy( (char*)memory.value, context.get_action().data.data(), copy_size );
+         auto copy_size = std::min( buffer_size, s );
+         memcpy( memory, context.act.data.data(), copy_size );
 
          return copy_size;
       }
 
       int action_data_size() {
-         return context.get_action().data.size();
+         return context.act.data.size();
       }
 
       name current_receiver() {
-         return context.get_receiver();
+         return context.receiver;
       }
 };
 
@@ -1209,7 +1078,7 @@ class console_api : public context_aware_api {
       // Kept as intrinsic rather than implementing on WASM side (using prints_l and strlen) because strlen is faster on native side.
       void prints(null_terminated_ptr str) {
          if ( !ignore ) {
-            context.console_append( static_cast<const char*>(str) );
+            context.console_append<const char*>(str);
          }
       }
 
@@ -1221,17 +1090,13 @@ class console_api : public context_aware_api {
 
       void printi(int64_t val) {
          if ( !ignore ) {
-            std::ostringstream oss;
-            oss << val;
-            context.console_append( oss.str() );
+            context.console_append(val);
          }
       }
 
       void printui(uint64_t val) {
          if ( !ignore ) {
-            std::ostringstream oss;
-            oss << val;
-            context.console_append( oss.str() );
+            context.console_append(val);
          }
       }
 
@@ -1599,17 +1464,17 @@ class context_free_transaction_api : public context_aware_api {
       }
 
       bool has_contract(account_name name){
-          const auto accnt  = context.db.find<account_metadata_object,by_name>( name );
+          const auto accnt  = context.db.find<account_object,by_name>( name );
           EOS_ASSERT( accnt != nullptr, action_validate_exception, "account '${account}' does not exist", ("account", name) );
-          return accnt->code_hash != digest_type() ;
+          return accnt->code.size() > 0;
       }
 
       void get_contract_code(account_name name, fc::sha256& code ) {
-          const auto accnt  = context.db.find<account_metadata_object,by_name>( name );
+          const auto accnt  = context.db.find<account_object,by_name>( name );
           EOS_ASSERT( accnt != nullptr, action_validate_exception, "account '${account}' does not exist", ("account", name) );
 
-          if( accnt->code_hash != digest_type()) {
-              code = accnt->code_hash;
+          if( accnt->code.size() > 0) {
+              code = fc::sha256::hash( accnt->code.data(), accnt->code.size() );
           } else {
               code = fc::sha256();
           }
@@ -2030,7 +1895,6 @@ REGISTER_INTRINSICS(privileged_api,
    (get_resource_limits,              void(int64_t,int,int,int)             )
    (set_resource_limits,              void(int64_t,int64_t,int64_t,int64_t) )
    (set_proposed_producers,           int64_t(int,int)                      )
-   (set_proposed_producers_ex,        int64_t(int64_t, int, int)            )
    (get_blockchain_parameters_packed, int(int, int)                         )
    (set_blockchain_parameters_packed, void(int,int)                         )
    (set_name_list_packed,             void(int64_t,int64_t,int,int)         )
@@ -2038,7 +1902,6 @@ REGISTER_INTRINSICS(privileged_api,
    (is_privileged,                    int(int64_t)                          )
    (set_privileged,                   void(int64_t, int)                    )
    (set_upgrade_parameters_packed, void(int, int)                           )
-   (preactivate_feature,              void(int)                             )
 );
 
 REGISTER_INJECTED_INTRINSICS(transaction_context,
@@ -2117,8 +1980,6 @@ REGISTER_INTRINSICS(permission_api,
 REGISTER_INTRINSICS(system_api,
    (current_time,          int64_t() )
    (publication_time,      int64_t() )
-   (is_feature_activated,  int(int)  )
-   (get_sender,            int64_t() )
 );
 
 REGISTER_INTRINSICS(context_free_system_api,

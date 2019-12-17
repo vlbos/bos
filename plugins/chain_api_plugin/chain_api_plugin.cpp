@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #include <eosio/chain_api_plugin/chain_api_plugin.hpp>
 #include <eosio/chain/exceptions.hpp>
 
@@ -24,10 +28,10 @@ chain_api_plugin::~chain_api_plugin(){}
 void chain_api_plugin::set_program_options(options_description&, options_description&) {}
 void chain_api_plugin::plugin_initialize(const variables_map&) {}
 
-struct async_result_visitor : public fc::visitor<fc::variant> {
+struct async_result_visitor : public fc::visitor<std::string> {
    template<typename T>
-   fc::variant operator()(const T& v) const {
-      return fc::variant(v);
+   std::string operator()(const T& v) const {
+      return fc::json::to_string(v);
    }
 };
 
@@ -37,8 +41,8 @@ struct async_result_visitor : public fc::visitor<fc::variant> {
           api_handle.validate(); \
           try { \
              if (body.empty()) body = "{}"; \
-             fc::variant result( api_handle.call_name(fc::json::from_string(body).as<api_namespace::call_name ## _params>()) ); \
-             cb(http_response_code, std::move(result)); \
+             auto result = api_handle.call_name(fc::json::from_string(body).as<api_namespace::call_name ## _params>()); \
+             cb(http_response_code, fc::json::to_string(result)); \
           } catch (...) { \
              http_plugin::handle_exception(#api_name, #call_name, body, cb); \
           } \
@@ -80,7 +84,6 @@ void chain_api_plugin::plugin_startup() {
 
    _http_plugin.add_api({
       CHAIN_RO_CALL(get_info, 200l),
-      CHAIN_RO_CALL(get_activated_protocol_features, 200),
       CHAIN_RO_CALL(get_block, 200),
       CHAIN_RO_CALL(get_block_header_state, 200),
       CHAIN_RO_CALL(get_account, 200),
@@ -102,8 +105,7 @@ void chain_api_plugin::plugin_startup() {
       CHAIN_RO_CALL(get_transaction_id, 200),
       CHAIN_RW_CALL_ASYNC(push_block, chain_apis::read_write::push_block_results, 202),
       CHAIN_RW_CALL_ASYNC(push_transaction, chain_apis::read_write::push_transaction_results, 202),
-      CHAIN_RW_CALL_ASYNC(push_transactions, chain_apis::read_write::push_transactions_results, 202),
-      CHAIN_RW_CALL_ASYNC(send_transaction, chain_apis::read_write::send_transaction_results, 202)
+      CHAIN_RW_CALL_ASYNC(push_transactions, chain_apis::read_write::push_transactions_results, 202)
    });
 }
 

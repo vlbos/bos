@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 #include <appbase/application.hpp>
 #include <eosio/chain_plugin/chain_plugin.hpp>
@@ -21,21 +25,24 @@ namespace eosio {
 
         APPBASE_PLUGIN_REQUIRES((chain_plugin))
         virtual void set_program_options(options_description& cli, options_description& cfg) override;
-        void handle_sighup() override;
 
         void plugin_initialize(const variables_map& options);
         void plugin_startup();
         void plugin_shutdown();
 
+        void   broadcast_block(const chain::signed_block &sb);
+
         string                       connect( const string& endpoint );
         string                       disconnect( const string& endpoint );
         optional<connection_status>  status( const string& endpoint )const;
         vector<connection_status>    connections()const;
-        bool is_syncing()const;///bos
+        bool is_syncing()const;
 
-        void maybe_sync_stable_checkpoints();///bos
+        void maybe_sync_stable_checkpoints();
+
+        size_t num_peers() const;
       private:
-        std::shared_ptr<class net_plugin_impl> my;///bos
+        std::shared_ptr<class net_plugin_impl> my;
    };
 
 }

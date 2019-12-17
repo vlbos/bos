@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #include <eosio/http_client_plugin/http_client_plugin.hpp>
 #include <eosio/chain/exceptions.hpp>
 #include <boost/algorithm/string/predicate.hpp>

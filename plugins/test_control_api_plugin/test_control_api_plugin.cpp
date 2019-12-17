@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #include <eosio/test_control_api_plugin/test_control_api_plugin.hpp>
 #include <eosio/chain/exceptions.hpp>
 
@@ -36,8 +40,8 @@ struct async_result_visitor : public fc::visitor<std::string> {
    [api_handle](string, string body, url_response_callback cb) mutable { \
           try { \
              if (body.empty()) body = "{}"; \
-             fc::variant result( api_handle.call_name(fc::json::from_string(body).as<api_namespace::call_name ## _params>()) ); \
-             cb(http_response_code, std::move(result)); \
+             auto result = api_handle.call_name(fc::json::from_string(body).as<api_namespace::call_name ## _params>()); \
+             cb(http_response_code, fc::json::to_string(result)); \
           } catch (...) { \
              http_plugin::handle_exception(#api_name, #call_name, body, cb); \
           } \

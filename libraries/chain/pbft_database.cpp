@@ -137,7 +137,7 @@ namespace eosio {
 
                     for (const auto& bp: as) {
                         for (const auto& pp: prepares) {
-                            if (bp.block_signing_key() == pp.first.second) prepare_count[pp.first.first] += 1;
+                            if (bp.block_signing_key == pp.first.second) prepare_count[pp.first.first] += 1;
                         }
                     }
                     for (const auto& e: prepare_count) {
@@ -186,8 +186,8 @@ namespace eosio {
                 //`branch_type` will always contain at least themselves.
                 //`in` block num should be higher than lib, yet fall on the same branch with lib.
                 return forks.first.size() > 1
-                && forks.second.size() == 1;
-                //&& !bs->in_current_chain;/// eos2.0 removed
+                && forks.second.size() == 1
+                && !bs->in_current_chain;
             };
 
 
@@ -223,7 +223,7 @@ namespace eosio {
 
                 if (high_watermark_block_num <= lib) return prepares_to_be_cached;
 
-                auto hwbs = ctrl.fork_db().get_block(ctrl.get_block_id_for_num(high_watermark_block_num));
+                auto hwbs = ctrl.fork_db().get_block_in_current_chain_by_num(high_watermark_block_num);
                 if ( hwbs && hwbs->id != my_prepare) {
                     auto sent = false;
                     for (const auto& sp : my_sps) {
@@ -313,10 +313,10 @@ namespace eosio {
                         if (commit_count.find(com.second.view) == commit_count.end()) commit_count[com.second.view] = 0;
                     }
 
-                    for (const auto &bp : as) {
-                      for (const auto &pc : commits) {
-                        if (bp.block_signing_key() == pc.first.second) commit_count[pc.first.first] += 1;
-                      }
+                    for (const auto& bp: as) {
+                        for (const auto& pc: commits) {
+                            if (bp.block_signing_key == pc.first.second) commit_count[pc.first.first] += 1;
+                        }
                     }
 
                     for (const auto& e: commit_count) {
@@ -410,7 +410,7 @@ namespace eosio {
 
             for (const auto& bp: as) {
                 for (const auto& pc: commits) {
-                    if (bp.block_signing_key() == pc.first.second) commit_count[pc.first.first] += 1;
+                    if (bp.block_signing_key == pc.first.second) commit_count[pc.first.first] += 1;
                 }
             }
 
@@ -654,7 +654,7 @@ namespace eosio {
 
                 for (const auto& bp: as) {
                     for (const auto& pp: prepares) {
-                        if (bp.block_signing_key() == pp.first.second) {
+                        if (bp.block_signing_key == pp.first.second) {
                             prepare_count[pp.first.first] += 1;
                             prepare_msg[pp.first.first].emplace_back(pp.second);
                         }
@@ -743,7 +743,7 @@ namespace eosio {
 
                 for (const auto& bp: as) {
                     for (const auto& cc: commits) {
-                        if (bp.block_signing_key() == cc.first.second) {
+                        if (bp.block_signing_key == cc.first.second) {
                             commit_count[cc.first.first] += 1;
                             commit_msg[cc.first.first].emplace_back(cc.second);
                         }
@@ -956,7 +956,7 @@ namespace eosio {
 
                                 for (const auto &bp: as) {
                                     for (const auto &k: keys) {
-                                        if (bp.block_signing_key() == k) count += 1;
+                                        if (bp.block_signing_key == k) count += 1;
                                     }
                                 }
 
@@ -1173,8 +1173,8 @@ namespace eosio {
 
                     auto head_checkpoint_schedule = bs->active_schedule;
 
-                    legacy::producer_schedule_type current_schedule;
-                    legacy::producer_schedule_type new_schedule;
+                    producer_schedule_type current_schedule;
+                    producer_schedule_type new_schedule;
 
                     if (pending_scb_num == 0) {
                         const auto& ucb = ctrl.get_upgrade_properties().upgrade_complete_block_num;
@@ -1185,17 +1185,17 @@ namespace eosio {
                             auto ucb_state = ctrl.fetch_block_state_by_number(ucb);
                             if (!ucb_state) return pending_scb_info;
                             current_schedule = ucb_state->active_schedule;
-                            new_schedule = ucb_state->pending_schedule.schedule;
+                            new_schedule = ucb_state->pending_schedule;
                         }
                     } else if (scb) {
                         current_schedule = scb->active_schedule;
-                        new_schedule = scb->pending_schedule.schedule;
+                        new_schedule = scb->pending_schedule;
                     } else {
                         return pending_scb_info;
                     }
 
                     if ((*itr)->is_stable) {
-                        if (head_checkpoint_schedule == (current_schedule) || head_checkpoint_schedule == (new_schedule)) {
+                        if (head_checkpoint_schedule == current_schedule || head_checkpoint_schedule == new_schedule) {
                             pending_scb_info = block_info_type{(*itr)->block_id};
                             pending_scb_num = pending_scb_info.block_num();
                         } else {
@@ -1241,7 +1241,7 @@ namespace eosio {
             if (!pending_checkpoint_block_num.empty()) {
                 std::sort(pending_checkpoint_block_num.begin(), pending_checkpoint_block_num.end());
                 for (auto bnum: pending_checkpoint_block_num) {
-                    if (auto bs = ctrl.fork_db().get_block(ctrl.get_block_id_for_num(bnum))) {
+                    if (auto bs = ctrl.fork_db().get_block_in_current_chain_by_num(bnum)) {
                         for (const auto& sp : my_sps) {
                             pbft_checkpoint cp;
                             cp.block_info = {bs->id};
@@ -1303,7 +1303,7 @@ namespace eosio {
 
                 for (const auto& bp: active_bps) {
                     for (const auto& c: csp->checkpoints) {
-                        if (bp.block_signing_key() == c.first) cp_count += 1;
+                        if (bp.block_signing_key == c.first) cp_count += 1;
                     }
                 }
                 if (cp_count >= threshold) {
@@ -1360,7 +1360,7 @@ namespace eosio {
             if (auto bs = ctrl.fetch_block_state_by_id(cp.block_info.block_id)) {
                 auto active_bps = bs->active_schedule.producers;
                 for (const auto& bp: active_bps) {
-                    if (bp.block_signing_key() == pk) return true;
+                    if (bp.block_signing_key == pk) return true;
                 }
             }
             return false;
@@ -1391,7 +1391,7 @@ namespace eosio {
                 auto cp_count = 0;
                 for (const auto& bp: as.producers) {
                     for (const auto& cpm: checkpoints_metadata) {
-                        if (bp.block_signing_key() == cpm.sender_key) cp_count += 1;
+                        if (bp.block_signing_key == cpm.sender_key) cp_count += 1;
                     }
                 }
                 return cp_count >= as.producers.size() * 2 / 3 + 1;
@@ -1428,7 +1428,7 @@ namespace eosio {
             return active_bps[target_view % active_bps.size()].block_signing_key;
         }
 
-        legacy::producer_schedule_type pbft_database::lscb_active_producers() const {
+        producer_schedule_type pbft_database::lscb_active_producers() const {
 
             auto ps = ctrl.initial_schedule();
             auto num = ctrl.last_stable_checkpoint_block_num();
@@ -1440,10 +1440,10 @@ namespace eosio {
             }
 
             if (auto bs = ctrl.fetch_block_state_by_number(num)) {
-                if (bs->pending_schedule.schedule.producers.empty()) {
+                if (bs->pending_schedule.producers.empty()) {
                     ps = bs->active_schedule;
                 } else {
-                    ps = bs->pending_schedule.schedule;
+                    ps = bs->pending_schedule;
                 }
             }
             return ps;
@@ -1484,7 +1484,7 @@ namespace eosio {
                     if (auto bs = ctrl.fetch_block_state_by_number(i)) {
                         auto as = bs->active_schedule.producers;
                         for (const auto& bp: as) {
-                            auto key = bp.block_signing_key(true);///eos2.0 todo
+                            auto key = bp.block_signing_key;
                             if (fork_schedules.find(key) == fork_schedules.end()) {
                                 fork_schedules[key] = i;
                             } else if ( i > fork_schedules[key]) {

@@ -8,10 +8,8 @@ import subprocess
 
 ###############################################################
 # nodeos_run_remote_test
-#
 #  Tests remote capability of the nodeos_run_test. Test will setup cluster and pass nodes info to nodeos_run_test. E.g.
 #  nodeos_run_remote_test.py -v --clean-run --dump-error-detail
-#
 ###############################################################
 
 Print=Utils.Print

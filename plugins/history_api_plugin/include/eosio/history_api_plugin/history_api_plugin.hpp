@@ -1,3 +1,8 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
+
 #pragma once
 #include <eosio/history_plugin/history_plugin.hpp>
 #include <eosio/chain_plugin/chain_plugin.hpp>

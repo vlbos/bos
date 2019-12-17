@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 
 #include <fc/crypto/sha256.hpp>
@@ -12,8 +16,6 @@ namespace eosio {
    namespace chain_apis {
       class read_only;
    }
-
-   class chain_plugin;
 
 namespace chain {
 
@@ -45,12 +47,8 @@ namespace chain {
 
          friend class eosio::net_plugin_impl;
          friend struct eosio::handshake_message;
-         friend class block_log;
-         friend struct trim_data;
-         friend class controller;
-         friend struct controller_impl;
-         friend class global_property_object;
-         friend struct snapshot_global_property_object;
+
+         friend struct ::hello; // TODO: Rushed hack to support bnet_plugin. Need a better solution.
    };
 
 } }  // namespace eosio::chain

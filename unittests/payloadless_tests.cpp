@@ -2,18 +2,17 @@
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #include <boost/test/unit_test.hpp>
 #pragma GCC diagnostic pop
-
+#include <boost/algorithm/string/predicate.hpp>
 #include <eosio/testing/tester.hpp>
 #include <eosio/chain/abi_serializer.hpp>
+
+#include <payloadless/payloadless.wast.hpp>
+#include <payloadless/payloadless.abi.hpp>
 
 #include <Runtime/Runtime.h>
 
 #include <fc/variant_object.hpp>
 #include <fc/io/json.hpp>
-
-#include <boost/algorithm/string/predicate.hpp>
-
-#include <contracts.hpp>
 
 #ifdef NON_VALIDATING_TEST
 #define TESTER tester
@@ -35,8 +34,8 @@ BOOST_AUTO_TEST_SUITE(payloadless_tests)
 BOOST_FIXTURE_TEST_CASE( test_doit, payloadless_tester ) {
    
    create_accounts( {N(payloadless)} );
-   set_code( N(payloadless), contracts::payloadless_wasm() );
-   set_abi( N(payloadless), contracts::payloadless_abi().data() );
+   set_code( N(payloadless), payloadless_wast );
+   set_abi( N(payloadless), payloadless_abi );
 
    auto trace = push_action(N(payloadless), N(doit), N(payloadless), mutable_variant_object());
    auto msg = trace->action_traces.front().console;
@@ -48,10 +47,10 @@ BOOST_FIXTURE_TEST_CASE( test_doit, payloadless_tester ) {
 BOOST_FIXTURE_TEST_CASE( test_abi_serializer, payloadless_tester ) {
 
    create_accounts( {N(payloadless)} );
-   set_code( N(payloadless), contracts::payloadless_wasm() );
-   set_abi( N(payloadless), contracts::payloadless_abi().data() );
+   set_code( N(payloadless), payloadless_wast );
+   set_abi( N(payloadless), payloadless_abi );
 
-   fc::variant pretty_trx = fc::mutable_variant_object()
+   variant pretty_trx = fc::mutable_variant_object()
       ("actions", fc::variants({
          fc::mutable_variant_object()
             ("account", name(N(payloadless)))

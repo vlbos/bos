@@ -1,8 +1,12 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 
 #include <eosio/chain/database_utils.hpp>
 #include <eosio/chain/exceptions.hpp>
-#include <eosio/chain/block_header_state.hpp>  ///bos
+#include <eosio/chain/block_header_state.hpp>
 #include <fc/variant_object.hpp>
 #include <boost/core/demangle.hpp>
 #include <ostream>
@@ -215,7 +219,7 @@ namespace eosio { namespace chain {
 
          T& data;
       };
-///bos  begin
+
        template<typename T>
        struct snapshot_pbft_migrate_row_reader : abstract_snapshot_row_reader {
          explicit snapshot_pbft_migrate_row_reader( T& data )
@@ -224,7 +228,7 @@ namespace eosio { namespace chain {
 
          void provide(std::istream& in) const override {
              row_validation_helper::apply(data, [&in,this](){
-                 if(typeid(T)== typeid(block_header_state)){
+                 if(typeid(T)== typeid(eosio::chain::block_header_state)){
                      std::ostringstream sstream;
                      sstream << in.rdbuf();
                      std::string str(sstream.str());
@@ -255,15 +259,15 @@ namespace eosio { namespace chain {
          T& data;
        };
 
-  template<typename T>
-       snapshot_pbft_migrate_row_reader<T> make_pbft_migrate_row_reader( T& data ) {
-           return snapshot_pbft_migrate_row_reader<T>(data);
-       }
-	   ///bos end
       template<typename T>
       snapshot_row_reader<T> make_row_reader( T& data ) {
          return snapshot_row_reader<T>(data);
       }
+
+       template<typename T>
+       snapshot_pbft_migrate_row_reader<T> make_pbft_migrate_row_reader( T& data ) {
+           return snapshot_pbft_migrate_row_reader<T>(data);
+       }
    }
 
    class snapshot_reader {
@@ -330,8 +334,6 @@ namespace eosio { namespace chain {
 
       virtual void validate() const = 0;
 
-      virtual void return_to_header() = 0;
-
       virtual ~snapshot_reader(){};
 
       protected:
@@ -369,7 +371,6 @@ namespace eosio { namespace chain {
          bool read_row( detail::abstract_snapshot_row_reader& row_reader ) override;
          bool empty ( ) override;
          void clear_section() override;
-         void return_to_header() override;
 
       private:
          const fc::variant& snapshot;
@@ -406,7 +407,6 @@ namespace eosio { namespace chain {
          bool read_row( detail::abstract_snapshot_row_reader& row_reader ) override;
          bool empty ( ) override;
          void clear_section() override;
-         void return_to_header() override;
 
       private:
          bool validate_section() const;

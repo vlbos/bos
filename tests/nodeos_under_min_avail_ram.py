@@ -13,16 +13,6 @@ import decimal
 import math
 import re
 
-###############################################################
-# nodeos_under_min_avail_ram
-#
-# Sets up 4 producing nodes using --chain-state-db-guard-size-mb and --chain-state-db-size-mb to verify that nodeos will
-# shutdown safely when --chain-state-db-guard-size-mb is reached and restarts the shutdown nodes, with a higher
-# --chain-state-db-size-mb size, to verify that the node can restart and continue till the guard is reached again. The
-# test both verifies all nodes going down and 1 node at a time.
-#
-###############################################################
-
 Print=Utils.Print
 errorExit=Utils.errorExit
 
@@ -58,6 +48,12 @@ class NamedAccounts:
         Print("NamedAccounts Name for %d is %s" % (temp, retStr))
         return retStr
 
+
+###############################################################
+# nodeos_voting_test
+# --dump-error-details <Upon error print etc/eosio/node_*/config.ini and var/lib/node_*/stderr.log to stdout>
+# --keep-logs <Don't delete var/lib/node_* folders upon test completion>
+###############################################################
 
 args = TestHelper.parse_args({"--dump-error-details","--keep-logs","-v","--leave-running","--clean-run","--wallet-port"})
 Utils.Debug=args.v
@@ -115,7 +111,6 @@ try:
     nodes.append(cluster.getNode(1))
     nodes.append(cluster.getNode(2))
     nodes.append(cluster.getNode(3))
-    numNodes=len(nodes)
 
 
     for account in accounts:
@@ -140,7 +135,7 @@ try:
     nodes[0].transferFunds(cluster.eosioAccount, contractAccount, transferAmount, "test transfer")
     trans=nodes[0].delegatebw(contractAccount, 1000000.0000, 88000000.0000, waitForTransBlock=True, exitOnError=True)
 
-    contractDir="unittests/test-contracts/integration_test"
+    contractDir="contracts/integration_test"
     wasmFile="integration_test.wasm"
     abiFile="integration_test.abi"
     Print("Publish contract")
@@ -168,16 +163,15 @@ try:
             data="{\"from\":\"%s\",\"to\":\"%s\",\"num\":%d}" % (fromAccount.name, toAccount.name, numAmount)
             opts="--permission %s@active --permission %s@active --expiration 90" % (contract, fromAccount.name)
             try:
-                trans=nodes[count % numNodes].pushMessage(contract, action, data, opts)
+                trans=nodes[0].pushMessage(contract, action, data, opts)
                 if trans is None or not trans[0]:
                     timeOutCount+=1
                     if timeOutCount>=3:
-                        Print("Failed to push create action to eosio contract for %d consecutive times, looks like nodeos already exited." % (timeOutCount))
-                        keepProcessing=False
-                        break
-
-                    Print("Failed to push create action to eosio contract. sleep for 5 seconds")
-                    time.sleep(5)
+                       Print("Failed to push create action to eosio contract for %d consecutive times, looks like nodeos already exited." % (timeOutCount))
+                       keepProcessing=False
+                       break
+                    Print("Failed to push create action to eosio contract. sleep for 60 seconds")
+                    time.sleep(60)
                 else:
                     timeOutCount=0
                 time.sleep(1)
@@ -203,35 +197,27 @@ try:
                 allDone=False
         if not allDone:
             time.sleep(5)
-        count+=1
-        if count>5:
+        if ++count>5:
             Utils.cmdError("All Nodes should have died")
             errorExit("Failure - All Nodes should have died")
 
-    for i in range(numNodes):
-        f = open(Utils.getNodeDataDir(i) + "/stderr.txt")
-        contents = f.read()
-        if contents.find("database chain::guard_exception") == -1:
-            errorExit("Node%d is expected to exit because of database guard_exception, but was not." % (i))
-
-    Print("all nodes exited with expected reason database_guard_exception")
-
     Print("relaunch nodes with new capacity")
-    addSwapFlags={}
+    addOrSwapFlags={}
+    numNodes=len(nodes)
     maxRAMValue+=2
     currentMinimumMaxRAM=maxRAMValue
     enabledStaleProduction=False
     for i in range(numNodes):
-        addSwapFlags[maxRAMFlag]=str(maxRAMValue)
-        #addSwapFlags["--max-irreversible-block-age"]=str(-1)
+        addOrSwapFlags[maxRAMFlag]=str(maxRAMValue)
+        #addOrSwapFlags["--max-irreversible-block-age"]=str(-1)
         nodeIndex=numNodes-i-1
         if not enabledStaleProduction:
-            addSwapFlags["--enable-stale-production"]=""   # just enable stale production for the first node
+            addOrSwapFlags["--enable-stale-production"]=""   # just enable stale production for the first node
             enabledStaleProduction=True
-        if not nodes[nodeIndex].relaunch(nodeIndex, "", newChain=False, addSwapFlags=addSwapFlags):
+        if not nodes[nodeIndex].relaunch(nodeIndex, "", newChain=False, addOrSwapFlags=addOrSwapFlags):
             Utils.cmdError("Failed to restart node0 with new capacity %s" % (maxRAMValue))
             errorExit("Failure - Node should have restarted")
-        addSwapFlags={}
+        addOrSwapFlags={}
         maxRAMValue=currentMinimumMaxRAM+30
 
     time.sleep(20)
@@ -262,7 +248,7 @@ try:
             data="{\"from\":\"%s\",\"to\":\"%s\",\"num\":%d}" % (fromAccount.name, toAccount.name, numAmount)
             opts="--permission %s@active --permission %s@active --expiration 90" % (contract, fromAccount.name)
             try:
-                trans=nodes[count % numNodes].pushMessage(contract, action, data, opts)
+                trans=nodes[0].pushMessage(contract, action, data, opts)
                 if trans is None or not trans[0]:
                     Print("Failed to push create action to eosio contract. sleep for 60 seconds")
                     time.sleep(60)
@@ -285,16 +271,16 @@ try:
             errorExit("Failure - Node should be alive")
 
     Print("relaunch node with even more capacity")
-    addSwapFlags={}
+    addOrSwapFlags={}
 
     time.sleep(10)
     maxRAMValue=currentMinimumMaxRAM+5
     currentMinimumMaxRAM=maxRAMValue
-    addSwapFlags[maxRAMFlag]=str(maxRAMValue)
-    if not nodes[len(nodes)-1].relaunch(nodeIndex, "", newChain=False, addSwapFlags=addSwapFlags):
+    addOrSwapFlags[maxRAMFlag]=str(maxRAMValue)
+    if not nodes[len(nodes)-1].relaunch(nodeIndex, "", newChain=False, addOrSwapFlags=addOrSwapFlags):
         Utils.cmdError("Failed to restart node %d with new capacity %s" % (numNodes-1, maxRAMValue))
         errorExit("Failure - Node should have restarted")
-    addSwapFlags={}
+    addOrSwapFlags={}
 
     time.sleep(10)
     allDone=True
@@ -322,7 +308,7 @@ try:
         data="{\"from\":\"%s\",\"to\":\"%s\",\"num\":%d}" % (fromAccount.name, toAccount.name, numAmount)
         opts="--permission %s@active --permission %s@active --expiration 90" % (contract, fromAccount.name)
         try:
-            trans=node.pushMessage(contract, action, data, opts)
+            trans=nodes[0].pushMessage(contract, action, data, opts)
             if trans is None or not trans[0]:
                 Print("Failed to push create action to eosio contract. sleep for 60 seconds")
                 time.sleep(60)
@@ -342,6 +328,6 @@ try:
 
     testSuccessful=True
 finally:
-    TestHelper.shutdown(cluster, walletMgr, testSuccessful=testSuccessful, killEosInstances=killEosInstances, killWallet=killWallet, keepLogs=keepLogs, cleanRun=killAll, dumpErrorDetails=dumpErrorDetails)
+    TestHelper.shutdown(cluster, walletMgr, testSuccessful, killEosInstances, killWallet, keepLogs, killAll, dumpErrorDetails)
 
 exit(0)

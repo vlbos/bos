@@ -1,3 +1,7 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 #include <eosio/chain/exceptions.hpp>
 #include <eosio/chain/types.hpp>
@@ -107,20 +111,6 @@ namespace fc {
 inline void to_variant(const eosio::chain::asset& var, fc::variant& vo) { vo = var.to_string(); }
 inline void from_variant(const fc::variant& var, eosio::chain::asset& vo) {
    vo = eosio::chain::asset::from_string(var.get_string());
-}
-}
-
-namespace fc {
-inline void from_variant(const fc::variant& var, eosio::chain::extended_asset& vo) {
-   if( var.is_array() ) {
-      const auto& va = var.get_array();
-      from_variant(va.at(0), vo.quantity);
-      from_variant(va.at(1), vo.contract);
-   } else {
-      const auto& vars = var.get_object();
-      from_variant(vars["quantity"], vo.quantity);
-      from_variant(vars["contract"], vo.contract);
-   }
 }
 }
 

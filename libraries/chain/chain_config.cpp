@@ -1,3 +1,8 @@
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
+
 #include <eosio/chain/chain_config.hpp>
 #include <eosio/chain/exceptions.hpp>
 
@@ -37,7 +42,7 @@ namespace eosio { namespace chain {
       EOS_ASSERT( 1 <= max_authority_depth, action_validate_exception,
                   "max authority depth should be at least 1" );
 }
-///bos
+
 void chain_config2::validate() const{
    EOS_ASSERT(std::numeric_limits<decltype(actor_blacklist.size())>::max() > actor_blacklist.size(), action_validate_exception, "Overflow in blacklist when adding actor blacklist!");
    EOS_ASSERT(std::numeric_limits<decltype(contract_blacklist.size())>::max() > contract_blacklist.size(), action_validate_exception, "Overflow in blacklist when adding contract blacklist!");

@@ -1,3 +1,8 @@
+
+/**
+ *  @file
+ *  @copyright defined in eos/LICENSE
+ */
 #pragma once
 #include <eosio/chain/types.hpp>
 #include <eosio/chain/authority.hpp>
@@ -12,7 +17,7 @@ namespace eosio { namespace chain {
       OBJECT_CTOR(reversible_block_object,(packedblock) )
 
       id_type        id;
-      uint32_t       blocknum = 0; //< blocknum should not be changed within a chainbase modifier lambda
+      uint32_t       blocknum = 0;
       shared_string  packedblock;
 
       void set_block( const signed_block_ptr& b ) {
@@ -26,15 +31,6 @@ namespace eosio { namespace chain {
          auto result = std::make_shared<signed_block>();
          fc::raw::unpack( ds, *result );
          return result;
-      }
-
-      block_id_type get_block_id()const {
-         fc::datastream<const char*> ds( packedblock.data(), packedblock.size() );
-         block_header h;
-         fc::raw::unpack( ds, h );
-         // Only need the block id to then look up the block state in fork database, so just unpack the block_header from the stored packed data.
-         // Avoid calling get_block() since that constructs a new signed_block in heap memory and unpacks the full signed_block from the stored packed data.
-         return h.id();
       }
    };
 

@@ -5,6 +5,9 @@
 #include <eosio/chain/pbft_database.hpp>
 #include <eosio/chain/global_property_object.hpp>
 
+#include <eosio.token/eosio.token.wast.hpp>
+#include <eosio.token/eosio.token.abi.hpp>
+
 #include <Runtime/Runtime.h>
 
 #include <fc/variant_object.hpp>
@@ -442,7 +445,7 @@ BOOST_AUTO_TEST_CASE(new_view_with_committed_cert_call_two_times_maybe_switch_fo
 
 
 private_key_type get_private_key( name keyname, string role ) {
-	return private_key_type::regenerate<fc::ecc::private_key_shim>(fc::sha256::hash(keyname.to_string()+role));
+	return private_key_type::regenerate<fc::ecc::private_key_shim>(fc::sha256::hash(string(keyname)+role));
 }
 
 public_key_type  get_public_key( name keyname, string role ){
@@ -484,7 +487,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 
 	c1.set_producers( {N(alice), N(bob)} );
 
-	vector<legacy::producer_key> c1_sch = { {N(alice),get_public_key(N(alice), "active")} };
+	vector<producer_key> c1_sch = { {N(alice),get_public_key(N(alice), "active")} };
 
 
 	/// c2
@@ -506,7 +509,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 
 	c2.set_producers( {N(alice), N(bob)} );
 
-	vector<legacy::producer_key> c2_sch = { {N(alice),get_public_key(N(alice), "active")},
+	vector<producer_key> c2_sch = { {N(alice),get_public_key(N(alice), "active")},
 									{N(bob),get_public_key(N(bob), "active")}};
 
 
@@ -529,7 +532,7 @@ BOOST_AUTO_TEST_CASE(switch_fork_reserve_prepare) {
 
 	c3_final.set_producers( {N(alice), N(bob)} );
 
-	vector<legacy::producer_key> c3_final_sch = { {N(bob),get_public_key(N(bob), "active")} };
+	vector<producer_key> c3_final_sch = { {N(bob),get_public_key(N(bob), "active")} };
 
 	push_blocks(c2, c3_final);
 
@@ -671,7 +674,7 @@ BOOST_AUTO_TEST_CASE(fetch_branch_from_block_at_same_fork_return_at_least_common
 	wdump((fc::json::to_pretty_string(r)));
 	c.produce_block();
 	auto res = c.set_producers( {N(dan),N(sam),N(pam)} );
-	vector<legacy::producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
+	vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
 								 {N(sam),get_public_key(N(sam), "active")},
 								 {N(pam),get_public_key(N(pam), "active")}};
 	wdump((fc::json::to_pretty_string(res)));
@@ -710,7 +713,7 @@ BOOST_AUTO_TEST_CASE(fetch_branch_from_block_at_same_block_return_at_least_commo
 	wdump((fc::json::to_pretty_string(r)));
 	c.produce_block();
 	auto res = c.set_producers( {N(dan),N(sam),N(pam)} );
-	vector<legacy::producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
+	vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
 								 {N(sam),get_public_key(N(sam), "active")},
 								 {N(pam),get_public_key(N(pam), "active")}};
 	wdump((fc::json::to_pretty_string(res)));
@@ -741,7 +744,7 @@ BOOST_AUTO_TEST_CASE(fetch_branch_from_block_at_diffent_fork_return_without_comm
 	wdump((fc::json::to_pretty_string(r)));
 	c.produce_block();
 	auto res = c.set_producers( {N(dan),N(sam),N(pam)} );
-	vector<legacy::producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
+	vector<producer_key> sch = { {N(dan),get_public_key(N(dan), "active")},
 								 {N(sam),get_public_key(N(sam), "active")},
 								 {N(pam),get_public_key(N(pam), "active")}};
 	wdump((fc::json::to_pretty_string(res)));
