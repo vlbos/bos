@@ -188,7 +188,7 @@ class privileged_api : public context_aware_api {
          context.control.get_resource_limits_manager().get_account_limits( account, ram_bytes, net_weight, cpu_weight, true); // *bos* add raw=true
       }
 
-      int64_t set_proposed_producers( array_ptr<char> packed_producer_schedule, size_t datalen) {
+      int64_t set_proposed_producers( array_ptr<char> packed_producer_schedule, uint32_t datalen ) {
          datastream<const char*> ds( packed_producer_schedule, datalen );
          vector<producer_key> producers;
          fc::raw::unpack(ds, producers);
@@ -205,7 +205,7 @@ class privileged_api : public context_aware_api {
          return context.control.set_proposed_producers( std::move(producers) );
       }
 
-      uint32_t get_blockchain_parameters_packed( array_ptr<char> packed_blockchain_parameters, size_t buffer_size) {
+      uint32_t get_blockchain_parameters_packed( array_ptr<char> packed_blockchain_parameters, uint32_t buffer_size) {
          auto& gpo = context.control.get_global_properties();
 
          auto s = fc::raw::pack_size( gpo.configuration );
@@ -1050,12 +1050,12 @@ class action_api : public context_aware_api {
    action_api( apply_context& ctx )
       :context_aware_api(ctx,true){}
 
-      int read_action_data(array_ptr<char> memory, size_t buffer_size) {
+      int read_action_data(array_ptr<char> memory, uint32_t buffer_size) {
          auto s = context.act.data.size();
          if( buffer_size == 0 ) return s;
 
-         auto copy_size = std::min( buffer_size, s );
-         memcpy( memory, context.act.data.data(), copy_size );
+         auto copy_size = std::min( static_cast<size_t>(buffer_size), s );
+         memcpy( (char*)memory.value, context.act.data.data(), copy_size );
 
          return copy_size;
       }
@@ -1762,8 +1762,7 @@ class call_depth_api : public context_aware_api {
       }
 };
 
-///bos begin
-/*eos todo
+
 class action_seed_api  : public context_aware_api {
 public:
     action_seed_api(apply_context& ctx)
@@ -1837,7 +1836,7 @@ private:
 REGISTER_INTRINSICS(action_seed_api,
 (bpsig_action_time_seed,  int(int, int)               )
 );
-*/
+
 ///bos end
 REGISTER_INJECTED_INTRINSICS(call_depth_api,
    (call_depth_assert,  void() )

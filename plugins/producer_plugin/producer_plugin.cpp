@@ -255,19 +255,19 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
       template<typename Type, typename Channel, typename F>
       auto publish_results_of(const Type &data, Channel& channel, F f) {
          auto publish_success = fc::make_scoped_exit([&, this](){
-            channel.publish(std::pair<fc::exception_ptr, Type>(nullptr, data));
+            channel.publish(priority::medium,std::pair<fc::exception_ptr, Type>(nullptr, data));
          });
 
          try {
             auto trace = f();
             if (trace->except) {
                publish_success.cancel();
-               channel.publish(std::pair<fc::exception_ptr, Type>(trace->except->dynamic_copy_exception(), data));
+               channel.publish(priority::medium,std::pair<fc::exception_ptr, Type>(trace->except->dynamic_copy_exception(), data));
             }
             return trace;
          } catch (const fc::exception& e) {
             publish_success.cancel();
-            channel.publish(std::pair<fc::exception_ptr, Type>(e.dynamic_copy_exception(), data));
+            channel.publish(priority::medium,std::pair<fc::exception_ptr, Type>(e.dynamic_copy_exception(), data));
             throw e;
          } catch( const std::exception& e ) {
             publish_success.cancel();
@@ -277,7 +277,7 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
                BOOST_CORE_TYPEID(e).name(),
                e.what()
             );
-            channel.publish(std::pair<fc::exception_ptr, Type>(fce.dynamic_copy_exception(),data));
+            channel.publish(priority::medium,std::pair<fc::exception_ptr, Type>(fce.dynamic_copy_exception(),data));
             throw fce;
          } catch( ... ) {
             publish_success.cancel();
@@ -286,7 +286,7 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
                std::current_exception()
             );
 
-            channel.publish(std::pair<fc::exception_ptr, Type>(fce.dynamic_copy_exception(), data));
+            channel.publish(priority::medium,std::pair<fc::exception_ptr, Type>(fce.dynamic_copy_exception(), data));
             throw fce;
          }
       };
@@ -333,7 +333,7 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
          }
 
          if( except ) {
-            app().get_channel<channels::rejected_block>().publish( block );
+            app().get_channel<channels::rejected_block>().publish(priority::low,block );
             return;
          }
 
@@ -388,7 +388,7 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
          auto send_response = [this, &trx, &chain, &next](const fc::static_variant<fc::exception_ptr, transaction_trace_ptr>& response) {
             next(response);
             if (response.contains<fc::exception_ptr>()) {
-               _transaction_ack_channel.publish(std::pair<fc::exception_ptr, transaction_metadata_ptr>(response.get<fc::exception_ptr>(), trx));
+               _transaction_ack_channel.publish(priority::low,std::pair<fc::exception_ptr, transaction_metadata_ptr>(response.get<fc::exception_ptr>(), trx));
                if (_pending_block_mode == pending_block_mode::producing) {
                   fc_dlog(_trx_trace_log, "[TRX_TRACE] Block ${block_num} for producer ${prod} is REJECTING tx: ${txid} : ${why} ",
                         ("block_num", chain.head_block_num() + 1)
@@ -401,7 +401,7 @@ class producer_plugin_impl : public std::enable_shared_from_this<producer_plugin
                           ("why",response.get<fc::exception_ptr>()->what()));
                }
             } else {
-               _transaction_ack_channel.publish(std::pair<fc::exception_ptr, transaction_metadata_ptr>(nullptr, trx));
+               _transaction_ack_channel.publish(priority::low,std::pair<fc::exception_ptr, transaction_metadata_ptr>(nullptr, trx));
                if (_pending_block_mode == pending_block_mode::producing) {
                   fc_dlog(_trx_trace_log, "[TRX_TRACE] Block ${block_num} for producer ${prod} is ACCEPTING tx: ${txid}",
                           ("block_num", chain.head_block_num() + 1)

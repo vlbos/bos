@@ -1,18 +1,13 @@
-#include <boost/test/unit_test.hpp>
-#include <eosio/testing/tester.hpp>
 #include <eosio/chain/abi_serializer.hpp>
-
-#include <eosio.system/eosio.system.wast.hpp>
-#include <eosio.system/eosio.system.abi.hpp>
-// These contracts are still under dev
-#include <eosio.token/eosio.token.wast.hpp>
-#include <eosio.token/eosio.token.abi.hpp>
-#include <eosio.msig/eosio.msig.wast.hpp>
-#include <eosio.msig/eosio.msig.abi.hpp>
+#include <eosio/testing/tester.hpp>
 
 #include <Runtime/Runtime.h>
 
 #include <fc/variant_object.hpp>
+
+#include <boost/test/unit_test.hpp>
+
+#include <contracts.hpp>
 
 #ifdef NON_VALIDATING_TEST
 #define TESTER tester
@@ -70,6 +65,21 @@ std::vector<genesis_account> test_genesis( {
 
 class bootseq_tester : public TESTER {
 public:
+   void deploy_contract( bool call_init = true ) {
+      set_code( config::system_account_name, contracts::eosio_system_wasm() );
+      set_abi( config::system_account_name, contracts::eosio_system_abi().data() );
+      if( call_init ) {
+         base_tester::push_action(config::system_account_name, N(init),
+                                  config::system_account_name,  mutable_variant_object()
+                                  ("version", 0)
+                                  ("core", CORE_SYM_STR)
+            );
+      }
+      const auto& accnt = control->db().get<account_object,by_name>( config::system_account_name );
+      abi_def abi;
+      BOOST_REQUIRE_EQUAL(abi_serializer::to_abi(accnt.abi, abi), true);
+      abi_ser.set_abi(abi, abi_serializer_max_time);
+   }
 
    fc::variant get_global_state() {
       vector<char> data = get_row_by_account( config::system_account_name, config::system_account_name, N(global), N(global) );
@@ -157,9 +167,9 @@ public:
          return get_currency_balance(N(eosio.token), symbol(CORE_SYMBOL), act);
     }
 
-    void set_code_abi(const account_name& account, const char* wast, const char* abi, const private_key_type* signer = nullptr) {
+    void set_code_abi(const account_name& account, const vector<uint8_t>& wasm, const char* abi, const private_key_type* signer = nullptr) {
        wdump((account));
-        set_code(account, wast, signer);
+        set_code(account, wasm, signer);
         set_abi(account, abi, signer);
         if (account == config::system_account_name) {
            const auto& accnt = control->db().get<account_object,by_name>( account );
@@ -186,8 +196,15 @@ BOOST_FIXTURE_TEST_CASE( bootseq_test, bootseq_tester ) {
         //  - eosio (code: eosio.bios) (already set by tester constructor)
         //  - eosio.msig (code: eosio.msig)
         //  - eosio.token (code: eosio.token)
-        set_code_abi(N(eosio.msig), eosio_msig_wast, eosio_msig_abi);//, &eosio_active_pk);
-        set_code_abi(N(eosio.token), eosio_token_wast, eosio_token_abi); //, &eosio_active_pk);
+        // set_code_abi(N(eosio.msig), contracts::eosio_msig_wasm(), contracts::eosio_msig_abi().data());//, &eosio_active_pk);
+        // set_code_abi(N(eosio.token), contracts::eosio_token_wasm(), contracts::eosio_token_abi().data()); //, &eosio_active_pk);
+
+        set_code_abi(N(eosio.msig),
+                     contracts::eosio_msig_wasm(),
+                     contracts::eosio_msig_abi().data());//, &eosio_active_pk);
+        set_code_abi(N(eosio.token),
+                     contracts::eosio_token_wasm(),
+                     contracts::eosio_token_abi().data()); //, &eosio_active_pk);
 
         // Set privileged for eosio.msig and eosio.token
         set_privileged(N(eosio.msig));
@@ -215,8 +232,7 @@ BOOST_FIXTURE_TEST_CASE( bootseq_test, bootseq_tester ) {
            create_account( a.aname, config::system_account_name );
         }
 
-        // Set eosio.system to eosio
-        set_code_abi(config::system_account_name, eosio_system_wast, eosio_system_abi);
+        deploy_contract();
 
         // Buy ram and stake cpu and net for each genesis accounts
         for( const auto& a : test_genesis ) {

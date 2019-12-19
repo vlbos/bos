@@ -467,8 +467,8 @@ struct controller_impl {
    ~controller_impl() {
       pending.reset();
 
-      db.flush();
-      reversible_blocks.flush();
+      // db.flush();///eos 2.0  deprecated
+      // reversible_blocks.flush();
    }
 
    void add_indices() {

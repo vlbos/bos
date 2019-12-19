@@ -1,7 +1,3 @@
-/**
- *  @file api_tests.cpp
- *  @copyright defined in eos/LICENSE
- */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
 #include <boost/test/unit_test.hpp>
@@ -14,10 +10,9 @@
 #include <fc/exception/exception.hpp>
 #include <fc/variant_object.hpp>
 
-#include "eosio_system_tester.hpp"
+#include <contracts.hpp>
 
-#include <test_ram_limit/test_ram_limit.abi.hpp>
-#include <test_ram_limit/test_ram_limit.wast.hpp>
+#include "eosio_system_tester.hpp"
 
 /*
  * register test suite `ram_tests`
@@ -44,7 +39,7 @@ BOOST_FIXTURE_TEST_CASE(ram_tests, eosio_system::eosio_system_tester) { try {
 
    for (auto i = 0; i < 10; ++i) {
       try {
-         set_code( N(testram11111), test_ram_limit_wast );
+         set_code( N(testram11111), contracts::test_ram_limit_wasm() );
          break;
       } catch (const ram_usage_exceeded&) {
          init_request_bytes += increment_contract_bytes;
@@ -56,7 +51,7 @@ BOOST_FIXTURE_TEST_CASE(ram_tests, eosio_system::eosio_system_tester) { try {
 
    for (auto i = 0; i < 10; ++i) {
       try {
-         set_abi( N(testram11111), test_ram_limit_abi );
+         set_abi( N(testram11111), contracts::test_ram_limit_abi().data() );
          break;
       } catch (const ram_usage_exceeded&) {
          init_request_bytes += increment_contract_bytes;
@@ -65,8 +60,8 @@ BOOST_FIXTURE_TEST_CASE(ram_tests, eosio_system::eosio_system_tester) { try {
       }
    }
    produce_blocks(10);
-   set_code( N(testram22222), test_ram_limit_wast );
-   set_abi( N(testram22222), test_ram_limit_abi );
+   set_code( N(testram22222), contracts::test_ram_limit_wasm() );
+   set_abi( N(testram22222), contracts::test_ram_limit_abi().data() );
    produce_blocks(10);
 
    auto total = get_total_stake( N(testram11111) );

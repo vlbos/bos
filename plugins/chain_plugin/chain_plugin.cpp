@@ -771,35 +771,35 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
             );
          }
 
-         my->pre_accepted_block_channel.publish(blk);
+         my->pre_accepted_block_channel.publish(priority::medium, blk);
       });
 
       my->accepted_block_header_connection = my->chain->accepted_block_header.connect(
             [this]( const block_state_ptr& blk ) {
-               my->accepted_block_header_channel.publish( blk );
+               my->accepted_block_header_channel.publish( priority::medium, blk );
             } );
 
       my->accepted_block_connection = my->chain->accepted_block.connect( [this]( const block_state_ptr& blk ) {
-         my->accepted_block_channel.publish( blk );
+         my->accepted_block_channel.publish( priority::high, blk );
       } );
 
       my->irreversible_block_connection = my->chain->irreversible_block.connect( [this]( const block_state_ptr& blk ) {
-         my->irreversible_block_channel.publish( blk );
+         my->irreversible_block_channel.publish( priority::low, blk );
       } );
 
       my->accepted_transaction_connection = my->chain->accepted_transaction.connect(
             [this]( const transaction_metadata_ptr& meta ) {
-               my->accepted_transaction_channel.publish( meta );
+               my->accepted_transaction_channel.publish( priority::low, meta );
             } );
 
       my->applied_transaction_connection = my->chain->applied_transaction.connect(
             [this]( const transaction_trace_ptr& trace ) {
-               my->applied_transaction_channel.publish( trace );
+               my->applied_transaction_channel.publish(priority::low, trace );
             } );
 
       my->accepted_confirmation_connection = my->chain->accepted_confirmation.connect(
             [this]( const header_confirmation& conf ) {
-               my->accepted_confirmation_channel.publish( conf );
+               my->accepted_confirmation_channel.publish(priority::low, conf );
             } );
 
 
@@ -827,27 +827,27 @@ void chain_plugin::plugin_initialize(const variables_map& options) {
 
       my->pbft_outgoing_prepare_connection = my->pbft_ctrl->state_machine.pbft_outgoing_prepare.connect(
               [this]( const pbft_prepare_ptr& prepare ) {
-                  my->pbft_outgoing_prepare_channel.publish( prepare );
+                  my->pbft_outgoing_prepare_channel.publish(priority::low, prepare );
               });
 
       my->pbft_outgoing_commit_connection = my->pbft_ctrl->state_machine.pbft_outgoing_commit.connect(
               [this]( const pbft_commit_ptr& commit ) {
-                  my->pbft_outgoing_commit_channel.publish( commit );
+                  my->pbft_outgoing_commit_channel.publish(priority::low, commit );
               });
 
       my->pbft_outgoing_view_change_connection = my->pbft_ctrl->state_machine.pbft_outgoing_view_change.connect(
               [this]( const pbft_view_change_ptr& view_change ) {
-                  my->pbft_outgoing_view_change_channel.publish( view_change );
+                  my->pbft_outgoing_view_change_channel.publish(priority::low, view_change );
               });
 
       my->pbft_outgoing_new_view_connection = my->pbft_ctrl->state_machine.pbft_outgoing_new_view.connect(
               [this]( const pbft_new_view_ptr& new_view ) {
-                  my->pbft_outgoing_new_view_channel.publish( new_view );
+                  my->pbft_outgoing_new_view_channel.publish(priority::low, new_view );
               });
 
       my->pbft_outgoing_checkpoint_connection = my->pbft_ctrl->state_machine.pbft_outgoing_checkpoint.connect(
               [this]( const pbft_checkpoint_ptr& checkpoint ) {
-                  my->pbft_outgoing_checkpoint_channel.publish( checkpoint );
+                  my->pbft_outgoing_checkpoint_channel.publish(priority::low, checkpoint );
               });
 
       my->chain->add_indices();
