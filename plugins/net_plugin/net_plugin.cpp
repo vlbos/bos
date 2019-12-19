@@ -3144,7 +3144,7 @@ namespace eosio {
            fc_dlog(logger, "received prepare at height: ${n}, view: ${v}, from ${k}, ",
                    ("n", pmm.msg.block_info.block_num())("v", pmm.msg.view)("k", pmm.sender_key));
 
-           pbft_incoming_prepare_channel.priority::medium,std::make_shared<pbft_message_metadata<pbft_prepare>>(std::move(pmm)));
+           pbft_incoming_prepare_channel.publish(priority::medium,std::make_shared<pbft_message_metadata<pbft_prepare>>(std::move(pmm)));
        }
 
     }
