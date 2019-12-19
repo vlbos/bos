@@ -150,7 +150,6 @@ constexpr auto intrinsic_table = boost::hana::make_tuple(
    "env.get_account_creation_time"_s,
    "env.current_time"_s,
    "env.publication_time"_s,
-   "env.is_feature_activated"_s,
    "env.get_sender"_s,
    "env.abort"_s,
    "env.eosio_assert"_s,
