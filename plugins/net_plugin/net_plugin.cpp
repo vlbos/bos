@@ -34,9 +34,7 @@
 
 using namespace eosio::chain::plugin_interface::compat;
 
-namespace fc {
-   extern std::unordered_map<std::string,logger>& get_logger_map();
-}
+
 
 namespace eosio {
    static appbase::abstract_plugin& _net_plugin = app().register_plugin<net_plugin>();
@@ -3762,8 +3760,7 @@ namespace eosio {
               connect(seed_node);
           }
 
-          if (fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
-              logger = fc::get_logger_map()[logger_name];
+          fc::logger::update( logger_name, logger );
       } catch (...) {
          // always want plugin_shutdown even on exception
          plugin_shutdown();
