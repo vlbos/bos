@@ -44,6 +44,11 @@ namespace eosio {
    using std::shared_ptr;
    using websocketpp::connection_hdl;
 
+   enum https_ecdh_curve_t {
+      SECP384R1,
+      PRIME256V1
+   };
+
    static http_plugin_defaults current_http_plugin_defaults;
 
    void http_plugin::set_defaults(const http_plugin_defaults config) {
@@ -343,7 +348,9 @@ namespace eosio {
       return true;
    }
 
-   http_plugin::http_plugin():my(new http_plugin_impl()){}
+   http_plugin::http_plugin():my(new http_plugin_impl()){
+      app().register_config_type<https_ecdh_curve_t>();
+   }
    http_plugin::~http_plugin(){}
 
    void http_plugin::set_program_options(options_description&, options_description& cfg) {
