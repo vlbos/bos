@@ -1064,8 +1064,8 @@ class action_api : public context_aware_api {
          return context.act.data.size();
       }
 
-      name current_receiver() {
-         return context.receiver;
+      uint64_t current_receiver() {
+         return context.receiver.value;
       }
 };
 

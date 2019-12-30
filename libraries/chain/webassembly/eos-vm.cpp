@@ -66,9 +66,9 @@ class eos_vm_instantiated_module : public wasm_instantiated_module_interface {
          }
          auto fn = [&]() {
             const auto& res = _runtime->_bkend->call(
-                &context, "env", "apply", context.receiver,
-                context.act.account,
-                context.act.name);
+                &context, "env", "apply", context.receiver.value,
+                context.act.account.value,
+                context.act.name.value);
          };
          try {
             checktime_watchdog wd(context.trx_context.transaction_timer);
@@ -103,7 +103,7 @@ bool eos_vm_runtime<Impl>::inject_module(IR::Module& module) {
 }
 
 template<typename Impl>
-std::unique_ptr<wasm_instantiated_module_interface> eos_vm_runtime<Impl>::instantiate_module(const char* code_bytes, size_t code_size, std::vector<uint8_t>,
+std::unique_ptr<wasm_instantiated_module_interface> eos_vm_runtime<Impl>::instantiate_module(const char* code_bytes, size_t code_size, std::vector<uint8_t> initial_memory,
                                                                                              const digest_type&, const uint8_t&, const uint8_t&) {
    using backend_t = backend<apply_context, Impl>;
    try {

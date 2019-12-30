@@ -1264,7 +1264,7 @@ struct controller_impl {
 
          const signed_transaction& trn = trx->packed_trx->get_signed_transaction();
          transaction_checktime_timer trx_timer(timer);
-         transaction_context trx_context(self, trn, trx->id(), std::move(trx_timer), start);
+         transaction_context trx_context(self, trn, trx->id, std::move(trx_timer), start);
          if ((bool)subjective_cpu_leeway && pending->_block_status == controller::block_status::incomplete) {
             trx_context.leeway = *subjective_cpu_leeway;
          }

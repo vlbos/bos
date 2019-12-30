@@ -208,7 +208,7 @@ void executor::execute(const code_descriptor& code, const memory& mem, apply_con
                start_func();
             }
          });
-         apply_func(context.get_receiver(), context.get_action().account, context.get_action().name);
+         apply_func(context.receiver.value, context.act.account.value, context.act.name.value);
          break;
       //case 1: clean eosio_exit
       case EOSVMOC_EXIT_CHECKTIME_FAIL:
