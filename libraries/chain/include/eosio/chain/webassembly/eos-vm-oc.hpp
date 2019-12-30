@@ -197,7 +197,7 @@ inline auto convert_native_to_wasm(T val) {
 }
 
 inline auto convert_native_to_wasm(const name &val) {
-   return native_to_wasm_t<const name &>(val);
+   return native_to_wasm_t<const name &>(val.value);
 }
 
 inline auto convert_native_to_wasm(const fc::time_point_sec& val) {

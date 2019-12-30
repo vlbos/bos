@@ -20,7 +20,7 @@ namespace eosio { namespace vm {
          return eosio::chain::name{val};
       }
       static auto to_wasm(eosio::chain::name val) {
-         return val;
+         return val.value;
       }
    };
 
